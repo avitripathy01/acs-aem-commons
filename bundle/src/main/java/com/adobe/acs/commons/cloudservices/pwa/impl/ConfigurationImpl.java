@@ -34,6 +34,7 @@ public class ConfigurationImpl implements Configuration {
     private SlingSettingsService slingSettingsService;
 
     private ResourceResolver resourceResolver;
+
     // These are resolved in init()
     private Page rootPage;
     private Page confPage;
@@ -71,9 +72,8 @@ public class ConfigurationImpl implements Configuration {
 
     @Override
     public boolean isReady() {
-        return rootPage != null;
-        // TODO Uncomment
-        //return slingSettingsService.getRunModes().contains("publish");
+
+        return rootPage != null && slingSettingsService.getRunModes().contains("publish");
     }
 
     @Override

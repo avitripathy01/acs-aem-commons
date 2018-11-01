@@ -5,10 +5,11 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.sling.api.SlingHttpServletRequest;
 import org.apache.sling.api.SlingHttpServletResponse;
 import org.apache.sling.api.resource.*;
-  
+
 import org.apache.sling.api.servlets.HttpConstants;
 import org.apache.sling.api.servlets.SlingSafeMethodsServlet;
 import org.apache.sling.models.factory.ModelFactory;
@@ -20,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import javax.servlet.Servlet;
 import javax.servlet.ServletException;
 import java.io.IOException;
+import java.util.Optional;
 import java.util.stream.StreamSupport;
 
 import static com.adobe.acs.commons.cloudservices.pwa.impl.Constants.*;
@@ -41,16 +43,16 @@ public class PwaServiceWorkerConfigServlet extends SlingSafeMethodsServlet {
     @Reference
     private ModelFactory modelFactory;
 
- 
+
     @Reference
     private ResourceResolverFactory resourceResolverFactory;
- 
+
     @Override
     protected final void doGet(SlingHttpServletRequest request, SlingHttpServletResponse response) throws ServletException, IOException {
         response.setContentType("application/json;charset=UTF-8");
         response.setCharacterEncoding("UTF-8");
 
- 
+
         ResourceResolver serviceResourceResolver = null;
         try {
             serviceResourceResolver = resourceResolverFactory.getServiceResourceResolver(AUTH_INFO);
@@ -64,24 +66,23 @@ public class PwaServiceWorkerConfigServlet extends SlingSafeMethodsServlet {
                 serviceResourceResolver.close();
             }
         }
- 
+
     }
 
     private JsonObject getConfig(SlingHttpServletRequest request) throws ServletException {
         final Configuration configuration = modelFactory.createModel(request, Configuration.class);
         final ValueMap properties = configuration.getProperties();
         final JsonObject json = new JsonObject();
-        if(properties !=null ){
+        if (properties != null) {
             final int version = properties.get(PN_VERSION, 1);
-            final String swScope = properties.get(KEY_SW_Scope, "/");
+            final String swScope = properties.get(KEY_SW_SCOPE, "/");
 
             json.addProperty(KEY_CACHE_NAME,
-                    "pwa__"
-                            + properties.get(PN_SHORT_NAME, configuration.getConfPage().getName())
+                    properties.get(PN_SHORT_NAME, configuration.getConfPage().getName())
                             + "-v" + String.valueOf(version));
 
             json.addProperty(KEY_VERSION, version);
-            json.addProperty(KEY_SW_Scope, swScope);
+            json.addProperty(KEY_SW_SCOPE, addHtmlExtension(swScope));
             json.add(KEY_FALLBACK, getFallback(request, configuration));
             json.add(KEY_NO_CACHE, getNoCache(configuration));
             json.add(KEY_PRE_CACHE, getPreCache(request, configuration));
@@ -89,6 +90,15 @@ public class PwaServiceWorkerConfigServlet extends SlingSafeMethodsServlet {
         }
 
         return json;
+    }
+
+    private String addHtmlExtension(final String path) {
+        String tmp = StringUtils.removeEnd(path, HTML_EXTENSION);
+        if ("/".equals(tmp)) {
+            return tmp;
+        } else {
+            return tmp + HTML_EXTENSION;
+        }
     }
 
     private JsonArray getFallback(final SlingHttpServletRequest request, final Configuration configuration) {

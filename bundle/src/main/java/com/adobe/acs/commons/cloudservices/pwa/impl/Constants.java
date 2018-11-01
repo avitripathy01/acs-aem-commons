@@ -75,7 +75,7 @@ public class Constants {
     public static final String KEY_NO_CACHE = "no_cache";
     public static final String KEY_PATTERN = "pattern";
     public static final String KEY_PATH = "path";
-    public static final String KEY_SW_Scope = "scope";
+    public static final String KEY_SW_SCOPE = "scope";
 
 
 }

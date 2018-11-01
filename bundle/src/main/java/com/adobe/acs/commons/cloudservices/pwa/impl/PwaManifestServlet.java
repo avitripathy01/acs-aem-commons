@@ -58,7 +58,6 @@ public class PwaManifestServlet extends SlingSafeMethodsServlet {
         ResourceResolver serviceResourceResolver = null;
         try {
             serviceResourceResolver = resourceResolverFactory.getServiceResourceResolver(AUTH_INFO);
-
             response.getWriter().write(getManifest(new ServiceUserRequest(request, serviceResourceResolver)).toString());
         } catch (LoginException e) {
             log.error("Could not obtain service user [ {} ]", SERVICE_NAME, e);
@@ -68,9 +67,6 @@ public class PwaManifestServlet extends SlingSafeMethodsServlet {
                 serviceResourceResolver.close();
             }
         }
-
-       // response.getWriter().write(getManifest(request).toString());
-
     }
 
     private JsonObject getManifest(SlingHttpServletRequest request) throws ServletException {
