@@ -82,7 +82,7 @@ public class PwaServiceWorkerConfigServlet extends SlingSafeMethodsServlet {
                             + "-v" + String.valueOf(version));
 
             json.addProperty(KEY_VERSION, version);
-            json.addProperty(KEY_SW_SCOPE, addHtmlExtension(swScope));
+            json.addProperty(KEY_SW_SCOPE, swScope);
             json.add(KEY_FALLBACK, getFallback(request, configuration));
             json.add(KEY_NO_CACHE, getNoCache(configuration));
             json.add(KEY_PRE_CACHE, getPreCache(request, configuration));
