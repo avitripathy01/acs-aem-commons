@@ -26,3 +26,11 @@ content/src/main/content/jcr_root/etc/clientlibs/.content.xml
 .metadata
 
 node_modules
+bundle/mockserver.log
+
+#VS Code
+.vscode
+.history
+
+#Jenv
+.java-version

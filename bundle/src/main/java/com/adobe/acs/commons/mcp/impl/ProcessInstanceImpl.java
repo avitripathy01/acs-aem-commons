@@ -27,23 +27,21 @@ import com.adobe.acs.commons.functions.CheckedConsumer;
 import com.adobe.acs.commons.mcp.ControlledProcessManager;
 import com.adobe.acs.commons.mcp.ProcessDefinition;
 import com.adobe.acs.commons.mcp.ProcessInstance;
+import com.adobe.acs.commons.mcp.model.ArchivedProcessFailure;
 import com.adobe.acs.commons.mcp.model.ManagedProcess;
 import com.adobe.acs.commons.mcp.model.Result;
-import com.adobe.acs.commons.mcp.model.impl.ArchivedProcessFailure;
 import com.adobe.acs.commons.mcp.util.DeserializeException;
 import com.adobe.acs.commons.mcp.util.ValueMapSerializer;
 import com.day.cq.commons.jcr.JcrUtil;
-import org.apache.jackrabbit.JcrConstants;
-import org.apache.sling.api.resource.LoginException;
-import org.apache.sling.api.resource.ModifiableValueMap;
-import org.apache.sling.api.resource.PersistenceException;
-import org.apache.sling.api.resource.Resource;
-import org.apache.sling.api.resource.ResourceResolver;
-import org.apache.sling.api.resource.ResourceUtil;
-import org.apache.sling.api.resource.ValueMap;
-import org.apache.sling.api.wrappers.ModifiableValueMapDecorator;
-import org.slf4j.LoggerFactory;
-
+import java.io.Serializable;
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.stream.Collectors;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.management.openmbean.CompositeData;
@@ -53,16 +51,15 @@ import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.OpenType;
 import javax.management.openmbean.SimpleType;
 import javax.management.openmbean.TabularType;
-import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import java.util.stream.Collectors;
+import org.apache.jackrabbit.JcrConstants;
+import org.apache.sling.api.resource.LoginException;
+import org.apache.sling.api.resource.ModifiableValueMap;
+import org.apache.sling.api.resource.PersistenceException;
+import org.apache.sling.api.resource.ResourceResolver;
+import org.apache.sling.api.resource.ResourceUtil;
+import org.apache.sling.api.resource.ValueMap;
+import org.apache.sling.api.wrappers.ModifiableValueMapDecorator;
+import org.slf4j.LoggerFactory;
 
 /**
  * Abstraction of a Process which runs using FAM and consists of one or more actions.
@@ -80,7 +77,7 @@ public class ProcessInstanceImpl implements ProcessInstance, Serializable {
     private transient ControlledProcessManager manager = null;
     private final transient ProcessDefinition definition;
     private transient boolean completedNormally = false;
-    private static final transient Random RANDOM = new Random();
+    private static final transient Random RANDOM = new SecureRandom();
 
     @Override
     public String getId() {
@@ -233,13 +230,15 @@ public class ProcessInstanceImpl implements ProcessInstance, Serializable {
                 action.manager.onFailure((failures, rr) -> {
                     asServiceUser(service -> recordErrors(step, failures, service));
                 });
-                action.manager.onFinish(() -> runStep(step + 1));
+                action.manager.onFinish(() -> {
+                    runStep(step + 1);
+                });
             }
             action.manager.deferredWithResolver(rr -> action.builder.accept(action.manager));
         }
     }
 
-    private void recordErrors(int step, List<Failure> failures, ResourceResolver rr) {
+    public void recordErrors(int step, List<Failure> failures, ResourceResolver rr) {
         if (failures.isEmpty()) {
             return;
         }
@@ -290,24 +289,18 @@ public class ProcessInstanceImpl implements ProcessInstance, Serializable {
         infoBean.setStatus("Aborted");
     }
 
-    private void asServiceUser(CheckedConsumer<ResourceResolver> action) {
-        ResourceResolver rr = null;
-        try {
-            rr = manager.getServiceResourceResolver();
+    public void asServiceUser(CheckedConsumer<ResourceResolver> action) {
+        try (ResourceResolver rr = manager.getServiceResourceResolver()){
             action.accept(rr);
             if (rr.hasChanges()) {
                 rr.commit();
             }
         } catch (Exception ex) {
             LOG.error("Error while performing JCR operations", ex);
-        } finally {
-            if (rr != null) {
-                rr.close();
-            }
         }
     }
 
-    private void persistStatus(ResourceResolver rr) throws PersistenceException {
+    public void persistStatus(ResourceResolver rr) throws PersistenceException {
         try {
             Map<String, Object> props = new HashMap<>();
             props.put(JcrConstants.JCR_PRIMARYTYPE, JcrConstants.NT_FOLDER);

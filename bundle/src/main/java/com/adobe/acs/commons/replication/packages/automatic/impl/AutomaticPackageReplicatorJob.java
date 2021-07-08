@@ -69,9 +69,7 @@ public class AutomaticPackageReplicatorJob implements Runnable, EventHandler {
     public void excute() throws RepositoryException, PackageException, IOException, ReplicationException {
 
         boolean succeeded = false;
-        ResourceResolver resolver = null;
-        try {
-            resolver = ConfigurationUpdateListener.getResourceResolver(resolverFactory);
+        try (ResourceResolver resolver = ConfigurationUpdateListener.getResourceResolver(resolverFactory)){
 
             Session session = resolver.adaptTo(Session.class);
 
@@ -81,7 +79,7 @@ public class AutomaticPackageReplicatorJob implements Runnable, EventHandler {
             // check if the package exists
             JcrPackage jcrPackage = pkgMgr.open(packageId);
             if (jcrPackage == null || jcrPackage.getNode() == null) {
-                log.warn("Package at path " + packagePath + " does not exist");
+                log.warn("Package at path '{}' does not exist", packagePath);
                 throw new IllegalArgumentException("Package at path " + packagePath + " does not exist");
             }
 
@@ -95,9 +93,6 @@ public class AutomaticPackageReplicatorJob implements Runnable, EventHandler {
             fireEvent(OSGI_EVENT_REPLICATED_TOPIC);
             succeeded = true;
         } finally {
-            if(resolver != null){
-                resolver.close();
-            }
             if(!succeeded){
                 fireEvent(OSGI_EVENT_FAILED_TOPIC);
             }

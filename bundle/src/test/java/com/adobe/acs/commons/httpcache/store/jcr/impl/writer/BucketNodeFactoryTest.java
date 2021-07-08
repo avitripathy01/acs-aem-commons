@@ -34,7 +34,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import com.adobe.acs.commons.httpcache.keys.CacheKey;
 import com.adobe.acs.commons.httpcache.store.jcr.impl.exceptions.BucketNodeFactoryException;
@@ -45,12 +45,6 @@ public class BucketNodeFactoryTest
 
     @Mock Session session;
     @Mock Node cacheRootNode;
-
-    @Before
-    public void setup() throws Exception{
-        when(session.isLive()).thenReturn(true);
-        when(cacheRootNode.getPath()).thenReturn(MockSettings.VALID_ROOT_PATH);
-    }
 
     @Test(expected = BucketNodeFactoryException.class)
     public void testInvalidPath() throws BucketNodeFactoryException, RepositoryException
@@ -160,6 +154,7 @@ public class BucketNodeFactoryTest
 
     private CacheKey mockCacheKey(final MockSettings mockSettings){
         return new CacheKey()
+
         {
             @Override
             public String getUri()
@@ -171,6 +166,21 @@ public class BucketNodeFactoryTest
             public String getHierarchyResourcePath()
             {
                 return mockSettings.cacheKeyHierarchyResourcePath;
+            }
+
+            @Override
+            public long getExpiryForCreation() {
+                return -1;
+            }
+
+            @Override
+            public long getExpiryForAccess() {
+                return -1;
+            }
+
+            @Override
+            public long getExpiryForUpdate() {
+                return -1;
             }
 
             @Override

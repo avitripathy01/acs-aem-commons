@@ -20,39 +20,51 @@
 package com.adobe.acs.commons.reports.api;
 
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Simple POJO for representing a page of results.
  */
 public final class ResultsPage {
 
-  private final List<Object> results;
+  private final Stream<? extends Object> results;
   private final int pageSize;
   private final int page;
+  private final long resultSize;
 
-  public ResultsPage(List<Object> results, int pageSize, int page) {
+  public ResultsPage(Stream<? extends Object> results, int pageSize, int page, long resultSize) {
     this.results = results;
+    this.resultSize = resultSize;
     this.pageSize = pageSize;
     this.page = page;
   }
 
-  public List<Object> getResults() {
-    return results;
+  public Stream<Object> getResults() {
+    return (Stream<Object>) results;
   }
 
-  public int getResultsStart() {
+  public List<Object> getResultsList() {
+    return results.collect(Collectors.toList());
+  }
+
+  public long getResultsStart() {
     return page != -1 ? (pageSize * page) + 1 : 1;
   }
 
-  public int getResultsEnd() {
-    return page != -1 ? (pageSize * page) + results.size() : results.size();
+  public long getResultsEnd() {
+    return page != -1 ? (pageSize * page) + resultSize : resultSize;
   }
 
   public int getNextPage() {
-    return (results.size() == pageSize && page != -1) ? page + 1 : -1;
+    return (resultSize == pageSize && page != -1) ? page + 1 : -1;
   }
 
   public int getPreviousPage() {
     return page > 0 ? page - 1 : -1;
+  }
+
+  public long getResultSize() {
+    return resultSize;
   }
 }

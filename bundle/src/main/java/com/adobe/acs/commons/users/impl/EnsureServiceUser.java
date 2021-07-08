@@ -69,7 +69,7 @@ public final class EnsureServiceUser implements EnsureAuthorizable {
     private static final Logger log = LoggerFactory.getLogger(EnsureServiceUser.class);
     private static final String SERVICE_NAME = "ensure-service-user";
     private static final Map<String, Object> AUTH_INFO;
-    public static boolean DEFAULT_ENSURE_IMMEDIATELY = true;
+    private static final boolean DEFAULT_ENSURE_IMMEDIATELY = true;
 
     static {
         AUTH_INFO = Collections.singletonMap(ResourceResolverFactory.SUBSERVICE, (Object) SERVICE_NAME);
@@ -112,11 +112,7 @@ public final class EnsureServiceUser implements EnsureAuthorizable {
     public void ensure(Operation operation, AbstractAuthorizable serviceUser) throws EnsureAuthorizableException {
         final long start = System.currentTimeMillis();
 
-        ResourceResolver resourceResolver = null;
-
-        try {
-            resourceResolver = resourceResolverFactory.getServiceResourceResolver(AUTH_INFO);
-
+        try (ResourceResolver resourceResolver = resourceResolverFactory.getServiceResourceResolver(AUTH_INFO)){
             if (Operation.ADD.equals(operation)) {
                 ensureExistance(resourceResolver, (ServiceUser) serviceUser);
             } else if (Operation.REMOVE.equals(operation)) {
@@ -135,15 +131,11 @@ public final class EnsureServiceUser implements EnsureAuthorizable {
 
             log.info(
                     "Successfully ensured [ {} ] of Service User [ {} ] in [ {} ms ]",
-                    operation.toString(), getAuthorizable().getPrincipalName(),
+                    operation, getAuthorizable().getPrincipalName(),
                             String.valueOf(System.currentTimeMillis() - start));
         } catch (Exception e) {
             throw new EnsureAuthorizableException(String.format("Failed to ensure [ %s ] of Service User [ %s ]",
                     operation.toString(), serviceUser.getPrincipalName()), e);
-        } finally {
-            if (resourceResolver != null) {
-                resourceResolver.close();
-            }
         }
     }
 

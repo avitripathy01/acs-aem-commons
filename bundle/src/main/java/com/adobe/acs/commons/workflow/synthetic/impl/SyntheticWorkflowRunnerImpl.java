@@ -45,7 +45,7 @@ import org.apache.sling.api.resource.LoginException;
 import org.apache.sling.api.resource.ResourceResolver;
 import org.apache.sling.api.resource.ResourceResolverFactory;
 import org.apache.sling.commons.osgi.PropertiesUtil;
-import org.apache.sling.jcr.resource.JcrResourceConstants;
+import org.apache.sling.jcr.resource.api.JcrResourceConstants;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceRegistration;
 import org.slf4j.Logger;
@@ -114,7 +114,6 @@ public class SyntheticWorkflowRunnerImpl implements SyntheticWorkflowRunner {
         this.execute(resourceResolver, payloadPath, workflowProcessLabels, null, false, false);
     }
 
-    @Override
     public final void execute(final ResourceResolver resourceResolver,
                               final String payloadPath,
                               final String[] workflowProcessLabels,
@@ -131,7 +130,6 @@ public class SyntheticWorkflowRunnerImpl implements SyntheticWorkflowRunner {
                 autoSaveAtEnd);
     }
 
-    @Override
     public void execute(ResourceResolver resourceResolver,
                         String payloadPath,
                         List<SyntheticWorkflowStep> workflowSteps,
@@ -168,7 +166,6 @@ public class SyntheticWorkflowRunnerImpl implements SyntheticWorkflowRunner {
 
     }
 
-    @Override
     public final void execute(final ResourceResolver resourceResolver,
                               final String payloadPath,
                               final WorkflowProcessIdType workflowProcessIdType,
@@ -277,14 +274,13 @@ public class SyntheticWorkflowRunnerImpl implements SyntheticWorkflowRunner {
                             session.save();
                         }
 
-                        log.debug("Executed synthetic workflow process [ {} ] on [ {} ] in [ "
-                                        + String.valueOf(System.currentTimeMillis() - start) + " ] ms",
-                                workflowStep.getId(), payloadPath);
+                        log.debug("Executed synthetic workflow process [ {} ] on [ {} ] in [ {} ] ms", //NOPMD - Flagged as false positive
+                                new Object[]{workflowStep.getId(), payloadPath, String.valueOf(System.currentTimeMillis() - start)});
                     } catch (RepositoryException e) {
-                        log.error("Could not save at end of synthetic workflow process execution"
-                                + " [ {} ] for payload path [ {} ]", workflowStep.getId(), payloadPath);
-                        log.error("Synthetic workflow process save failed.", e);
-                        throw new WorkflowException(e);
+                        String msg = String.format("Could not save at end of synthetic workflow process execution"
+                                + " [ %s ] for payload path [ %s ]", workflowStep.getId(), payloadPath);
+                        log.error("Synthetic workflow process save failed: {}",msg, e);
+                        throw new WorkflowException(msg,e);
                     }
                 }
             } else {

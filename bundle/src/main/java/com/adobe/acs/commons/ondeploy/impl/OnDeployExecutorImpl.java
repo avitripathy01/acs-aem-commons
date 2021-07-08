@@ -19,10 +19,13 @@
  */
 package com.adobe.acs.commons.ondeploy.impl;
 
+import com.adobe.acs.commons.ondeploy.OnDeployExecutor;
 import com.adobe.acs.commons.ondeploy.OnDeployScriptProvider;
 import com.adobe.acs.commons.ondeploy.scripts.OnDeployScript;
+import com.adobe.acs.commons.util.RequireAem;
 import com.adobe.granite.jmx.annotation.AnnotatedStandardMBean;
 import com.day.cq.commons.jcr.JcrConstants;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.ConfigurationPolicy;
 import org.apache.felix.scr.annotations.Properties;
@@ -50,12 +53,12 @@ import javax.management.openmbean.OpenType;
 import javax.management.openmbean.SimpleType;
 import javax.management.openmbean.TabularDataSupport;
 import javax.management.openmbean.TabularType;
-import java.util.Calendar;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Date;
+import java.util.Calendar;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -74,18 +77,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * than once.  This also covers the scenario where a script is run a second
  * time after failing the first time.
  */
-@Component(
-        label = "ACS AEM Commons - On-Deploy Scripts Executor",
-        description = "Developer tool that triggers scripts (specified via an implementation of OnDeployScriptProvider) to execute on deployment.",
-        metatype = true, policy = ConfigurationPolicy.REQUIRE)
+@Component(metatype = false, policy = ConfigurationPolicy.REQUIRE)
 @Properties({ @Property(label = "MBean Name", name = "jmx.objectname",
-        value = "com.adobe.acs.commons:type=On-Deploy Scripts", propertyPrivate = true) })
-@Service(value = DynamicMBean.class)
-public class OnDeployExecutorImpl extends AnnotatedStandardMBean implements OnDeployExecutor {
+        value = "com.adobe.acs.commons:type=On-Deploy Scripts") })
+@Service(value = {DynamicMBean.class, OnDeployExecutorMBean.class, OnDeployExecutor.class})
+public class OnDeployExecutorImpl extends AnnotatedStandardMBean implements OnDeployExecutorMBean, OnDeployExecutor {
     static final String SCRIPT_STATUS_JCR_FOLDER = "/var/acs-commons/on-deploy-scripts-status";
 
     private static final String SCRIPT_DATE_END = "endDate";
     private static final String SCRIPT_DATE_START = "startDate";
+    private static final String SCRIPT_OUTPUT = "output";
     private static final String SCRIPT_STATUS = "status";
     private static final String SCRIPT_STATUS_FAIL = "fail";
     private static final String SCRIPT_STATUS_RUNNING = "running";
@@ -97,6 +98,9 @@ public class OnDeployExecutorImpl extends AnnotatedStandardMBean implements OnDe
 
     @Reference
     private ResourceResolverFactory resourceResolverFactory;
+    
+    @Reference(target="(distribution=classic)")
+    RequireAem requireAem;
 
     @Reference(name = "scriptProvider", referenceInterface = OnDeployScriptProvider.class, cardinality = ReferenceCardinality.MANDATORY_MULTIPLE, policy = ReferencePolicy.DYNAMIC)
     private List<OnDeployScriptProvider> scriptProviders = new CopyOnWriteArrayList<>();
@@ -107,7 +111,7 @@ public class OnDeployExecutorImpl extends AnnotatedStandardMBean implements OnDe
 
     static {
         try {
-            scriptsItemNames = new String[] { "_provider", "_script", "startDate", "endDate", "status" };
+            scriptsItemNames = new String[] { "_provider", "_script", SCRIPT_DATE_START, SCRIPT_DATE_END, SCRIPT_STATUS };
             scriptsCompositeType =
                     new CompositeType("Script Row", "single script status row", scriptsItemNames, new String[] {
                             "Provider", "Script", "Start Date", "End Date", "Status" },
@@ -123,9 +127,10 @@ public class OnDeployExecutorImpl extends AnnotatedStandardMBean implements OnDe
     }
 
     public OnDeployExecutorImpl() throws NotCompliantMBeanException {
-        super(OnDeployExecutor.class);
+        super(OnDeployExecutorMBean.class);
     }
 
+    //TODO: Is this really necessary?? This is default behavior, no need to specify explicitly here
     protected void bindResourceResolverFactory(ResourceResolverFactory resourceResolverFactory) {
         this.resourceResolverFactory = resourceResolverFactory;
     }
@@ -142,18 +147,9 @@ public class OnDeployExecutorImpl extends AnnotatedStandardMBean implements OnDe
             logger.debug("No on-deploy scripts found.");
             return;
         }
-        ResourceResolver resourceResolver = null;
-        try {
-            resourceResolver = logIn();
+        
+        try (ResourceResolver resourceResolver = logIn()) {
             runScripts(resourceResolver, scripts);
-        } finally {
-            if (resourceResolver != null) {
-                try {
-                    resourceResolver.close();
-                } catch (Exception e) {
-                    logger.warn("Failed resourceResolver.close()", e);
-                }
-            }
         }
     }
 
@@ -206,12 +202,15 @@ public class OnDeployExecutorImpl extends AnnotatedStandardMBean implements OnDe
             try {
                 script.execute(resourceResolver);
                 logger.info("On-deploy script completed successfully: {}", statusResource.getPath());
-                trackScriptEnd(statusResource, SCRIPT_STATUS_SUCCESS);
+                trackScriptEnd(statusResource, SCRIPT_STATUS_SUCCESS, "");
                 return true;
             } catch (Exception e) {
                 String errMsg = "On-deploy script failed: " + statusResource.getPath();
                 logger.error(errMsg, e);
-                trackScriptEnd(statusResource, SCRIPT_STATUS_FAIL);
+                // The script may have made changes to the resolver before failing - make sure to get rid of them,
+                // since they most likely represent an inconsistent state.
+                resourceResolver.revert();
+                trackScriptEnd(statusResource, SCRIPT_STATUS_FAIL, ExceptionUtils.getStackTrace(e.getCause()));
                 throw new OnDeployEarlyTerminationException(new RuntimeException(errMsg));
             }
         } else if (!status.equals(SCRIPT_STATUS_SUCCESS)) {
@@ -235,11 +234,12 @@ public class OnDeployExecutorImpl extends AnnotatedStandardMBean implements OnDe
         }
     }
 
-    protected void trackScriptEnd(Resource statusResource, String status) {
+    protected void trackScriptEnd(Resource statusResource, String status, String output) {
         try {
             ModifiableValueMap properties = statusResource.adaptTo(ModifiableValueMap.class);
             properties.put(SCRIPT_STATUS, status);
             properties.put(SCRIPT_DATE_END, Calendar.getInstance());
+            properties.put(SCRIPT_OUTPUT, output);
             statusResource.getResourceResolver().commit();
         } catch (PersistenceException e) {
             logger.error("On-deploy script status node could not be updated: {} - status: {}", statusResource.getPath(), status);
@@ -254,6 +254,7 @@ public class OnDeployExecutorImpl extends AnnotatedStandardMBean implements OnDe
             properties.put(SCRIPT_STATUS, SCRIPT_STATUS_RUNNING);
             properties.put(SCRIPT_DATE_START, Calendar.getInstance());
             properties.remove(SCRIPT_DATE_END);
+            properties.remove(SCRIPT_OUTPUT);
             statusResource.getResourceResolver().commit();
         } catch (PersistenceException e) {
             logger.error("On-deploy script cannot be run because the system could not write to the script status node: {}", statusResource.getPath());

@@ -19,8 +19,8 @@
  */
 package com.adobe.acs.commons.mcp.model;
 
-import aQute.bnd.annotation.ProviderType;
-import com.adobe.acs.commons.mcp.model.impl.ArchivedProcessFailure;
+import org.osgi.annotation.versioning.ProviderType;
+
 import java.io.Serializable;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -274,9 +274,9 @@ public class ManagedProcess implements Serializable {
         cal.setTimeInMillis(time);
         DateFormat format;
         if (cal.after(today)) {
-            format = SimpleDateFormat.getTimeInstance();        
+            format = DateFormat.getTimeInstance();        
         } else {
-            format = SimpleDateFormat.getDateTimeInstance();
+            format = DateFormat.getDateTimeInstance();
         }
         return format.format(new Date(time));
     }

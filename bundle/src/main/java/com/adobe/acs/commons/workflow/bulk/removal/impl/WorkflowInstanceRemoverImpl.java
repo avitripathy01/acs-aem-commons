@@ -21,6 +21,7 @@
 package com.adobe.acs.commons.workflow.bulk.removal.impl;
 
 import com.adobe.acs.commons.workflow.bulk.removal.WorkflowInstanceRemover;
+import com.adobe.acs.commons.workflow.bulk.removal.WorkflowRemovalConfig;
 import com.adobe.acs.commons.workflow.bulk.removal.WorkflowRemovalException;
 import com.adobe.acs.commons.workflow.bulk.removal.WorkflowRemovalForceQuitException;
 import com.adobe.acs.commons.workflow.bulk.removal.WorkflowRemovalMaxDurationExceededException;
@@ -75,6 +76,8 @@ public final class WorkflowInstanceRemoverImpl implements WorkflowInstanceRemove
     private static final String PN_MODEL_ID = "modelId";
 
     private static final String PN_STARTED_AT = "startedAt";
+
+    private static final String PN_START_TIME = "startTime";
 
     private static final String PN_STATUS = "status";
 
@@ -185,29 +188,32 @@ public final class WorkflowInstanceRemoverImpl implements WorkflowInstanceRemove
         this.forceQuit.set(true);
     }
 
-    /**
-     * {@inheritDoc}
-     */
-    public int removeWorkflowInstances(final ResourceResolver resourceResolver,
-                                       final Collection<String> modelIds,
-                                       final Collection<String> statuses,
-                                       final Collection<Pattern> payloads,
-                                       final Calendar olderThan)
-            throws PersistenceException, WorkflowRemovalException, InterruptedException, WorkflowRemovalForceQuitException {
+    @Override
+    public int removeWorkflowInstances(ResourceResolver resourceResolver,
+        Collection<String> modelIds, Collection<String> statuses,
+        Collection<Pattern> payloads, Calendar olderThan)
+        throws PersistenceException, WorkflowRemovalException, InterruptedException, WorkflowRemovalForceQuitException {
         return removeWorkflowInstances(resourceResolver, modelIds, statuses, payloads, olderThan, BATCH_SIZE);
     }
 
-    /**
-     * {@inheritDoc}
-     */
-    public int removeWorkflowInstances(final ResourceResolver resourceResolver,
-                                       final Collection<String> modelIds,
-                                       final Collection<String> statuses,
-                                       final Collection<Pattern> payloads,
-                                       final Calendar olderThan,
-                                       final int batchSize)
-            throws PersistenceException, WorkflowRemovalException, InterruptedException, WorkflowRemovalForceQuitException {
+    @Override
+    public int removeWorkflowInstances(ResourceResolver resourceResolver,
+        Collection<String> modelIds, Collection<String> statuses,
+        Collection<Pattern> payloads, Calendar olderThan, int batchSize)
+        throws PersistenceException, WorkflowRemovalException, InterruptedException, WorkflowRemovalForceQuitException {
         return removeWorkflowInstances(resourceResolver, modelIds, statuses, payloads, olderThan, batchSize, -1);
+    }
+
+    @Override
+    public int removeWorkflowInstances(ResourceResolver resourceResolver,
+        Collection<String> modelIds, Collection<String> statuses,
+        Collection<Pattern> payloads, Calendar olderThan, int batchSize,
+        int maxDurationInMins)
+        throws PersistenceException, WorkflowRemovalException, InterruptedException, WorkflowRemovalForceQuitException {
+        WorkflowRemovalConfig workflowRemovalConfig = new WorkflowRemovalConfig(modelIds,statuses,payloads,olderThan,-1);
+        workflowRemovalConfig.setBatchSize(batchSize);
+        workflowRemovalConfig.setMaxDurationInMins(maxDurationInMins);
+        return removeWorkflowInstances(resourceResolver, workflowRemovalConfig);
     }
 
     /**
@@ -215,12 +221,7 @@ public final class WorkflowInstanceRemoverImpl implements WorkflowInstanceRemove
      */
     @SuppressWarnings({"squid:S3776", "squid:S1141"})
     public int removeWorkflowInstances(final ResourceResolver resourceResolver,
-                                       final Collection<String> modelIds,
-                                       final Collection<String> statuses,
-                                       final Collection<Pattern> payloads,
-                                       final Calendar olderThan,
-                                       final int batchSize,
-                                       final int maxDurationInMins)
+                                       final WorkflowRemovalConfig workflowRemovalConfig)
             throws PersistenceException, WorkflowRemovalException, InterruptedException, WorkflowRemovalForceQuitException {
 
         final long start = System.currentTimeMillis();
@@ -229,6 +230,7 @@ public final class WorkflowInstanceRemoverImpl implements WorkflowInstanceRemove
         int count = 0;
         int checkedCount = 0;
         int workflowRemovedCount = 0;
+        int maxDurationInMins = workflowRemovalConfig.getMaxDurationInMins();
 
         if (maxDurationInMins > 0) {
             // Max duration has been requested (greater than 0)
@@ -276,8 +278,15 @@ public final class WorkflowInstanceRemoverImpl implements WorkflowInstanceRemove
 
                         final String instanceStatus = getStatus(instance);
                         final String model = properties.get(PN_MODEL_ID, String.class);
-                        final Calendar startTime = properties.get(PN_STARTED_AT, Calendar.class);
+                        final Calendar startTime = properties.get(PN_START_TIME, properties.get(PN_STARTED_AT, Calendar.class));
                         final String payload = properties.get(PAYLOAD_PATH, String.class);
+                        final long startTimeDelta = start - workflowRemovalConfig.getOlderThanMillis();
+                        final Collection<String> statuses = workflowRemovalConfig.getStatuses();
+                        final Collection<String> modelIds = workflowRemovalConfig.getModelIds();
+                        final Calendar olderThan = workflowRemovalConfig.getOlderThan();
+                        final long olderThanMillis = workflowRemovalConfig.getOlderThanMillis();
+                        final Collection<Pattern> payloads = workflowRemovalConfig.getPayloads();
+                        final int batchSize = workflowRemovalConfig.getBatchSize();
 
                         if (StringUtils.isBlank(payload)) {
                             log.warn("Unable to find payload for Workflow instance [ {} ]", instance.getPath());
@@ -291,9 +300,14 @@ public final class WorkflowInstanceRemoverImpl implements WorkflowInstanceRemove
                             log.trace("Workflow instance [ {} ] has non-matching model of [ {} ]", instance.getPath(), model);
                             remaining++;
                             continue;
-                        } else if (olderThan != null && startTime != null && startTime.before(olderThan)) {
+                        } else if (olderThan != null && startTime != null && startTime.after(olderThan)) {
                             log.trace("Workflow instance [ {} ] has non-matching start time of [ {} ]", instance.getPath(),
                                     startTime);
+                            remaining++;
+                            continue;
+                        } else if (olderThanMillis > -1 && startTime != null && startTimeDelta < startTime.getTimeInMillis()) {
+                            log.trace("Workflow instance [ {} ] has non-matching start time delta of [ {} ]ms", instance.getPath(),
+                                olderThanMillis);
                             remaining++;
                             continue;
                         } else {
@@ -515,25 +529,31 @@ public final class WorkflowInstanceRemoverImpl implements WorkflowInstanceRemove
 
     private List<Resource> getWorkflowInstanceFolders(final ResourceResolver resourceResolver) {
         final List<Resource> folders = new ArrayList<Resource>();
-        final Resource root = resourceResolver.getResource(WORKFLOW_INSTANCES_PATH);
-        final Iterator<Resource> itr = root.listChildren();
 
-        boolean addedRoot = false;
+        for (final String rootPath : WORKFLOW_INSTANCES_PATHS) {
 
-        while (itr.hasNext()) {
-            Resource resource = itr.next();
+            final Resource root = resourceResolver.getResource(rootPath);
+            final Iterator<Resource> itr = root.listChildren();
+            boolean addedRoot = false;
 
-            if (isWorkflowServerFolder(resource)) {
-                folders.add(resource);
-            } else if (!addedRoot && isWorkflowDatedFolder(resource)) {
+            while (itr.hasNext()) {
+                Resource resource = itr.next();
+
+                if (isWorkflowServerFolder(resource)) {
+                    folders.add(resource);
+                } else if (!addedRoot && isWorkflowDatedFolder(resource)) {
+                    folders.add(root);
+                    addedRoot = true;
+                }
+            }
+
+            if (folders.isEmpty()) {
                 folders.add(root);
-                addedRoot = true;
             }
         }
 
-        if (folders.isEmpty()) {
-            folders.add(root);
-        }
+        log.debug("Collected workflow instance folders [ {} ] for removal.",
+                org.apache.commons.lang3.StringUtils.join(folders, ","));
 
         return folders;
     }

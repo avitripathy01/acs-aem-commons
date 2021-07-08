@@ -20,6 +20,7 @@
 package com.adobe.acs.commons.mcp.impl.processes.asset;
 
 import com.adobe.acs.commons.fam.ActionManager;
+import com.adobe.acs.commons.fam.actions.Actions;
 import com.adobe.acs.commons.functions.CheckedConsumer;
 import com.adobe.acs.commons.data.CompositeVariant;
 import com.adobe.acs.commons.data.Spreadsheet;
@@ -29,6 +30,7 @@ import com.google.common.base.Function;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +40,7 @@ import org.apache.jackrabbit.JcrConstants;
 import org.apache.sling.api.resource.PersistenceException;
 import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceResolver;
+import org.apache.sling.api.resource.ValueMap;
 import org.apache.sling.commons.mime.MimeTypeService;
 import org.apache.sling.testing.mock.sling.ResourceResolverType;
 import org.apache.sling.testing.mock.sling.junit.SlingContext;
@@ -46,10 +49,10 @@ import org.junit.Test;
 import org.junit.Rule;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import static org.junit.Assert.assertEquals;
-import static org.mockito.Matchers.any;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 
@@ -59,8 +62,11 @@ import static org.mockito.Mockito.mock;
 @RunWith(MockitoJUnitRunner.class)
 public class UrlAssetImportTest {
 
+    private static List<String> CASE_INSENSITIVE_HEADERS = Arrays.asList("Source", "Rendition", "Target",
+                                                                         "Original");
+
     @Rule
-    public final SlingContext context = new SlingContext(ResourceResolverType.JCR_OAK);
+    public final SlingContext context = new SlingContext(ResourceResolverType.JCR_MOCK);
 
     @Mock
     private ActionManager actionManager;
@@ -100,12 +106,14 @@ public class UrlAssetImportTest {
 
         importProcess = new UrlAssetImport(context.getService(MimeTypeService.class), null);
         importProcess.fileData = new Spreadsheet(true, "source", "target", "rendition", "original","dc:title", "dc:attr");
+        importProcess.dryRunMode = false;
 
         doAnswer(invocation -> {
             CheckedConsumer<ResourceResolver> method = (CheckedConsumer<ResourceResolver>) invocation.getArguments()[0];
             method.accept(context.resourceResolver());
             return null;
         }).when(actionManager).deferredWithResolver(any(CheckedConsumer.class));
+        Actions.setCurrentActionManager(actionManager);
     }
 
     private void addImportRow(String... cols) {
@@ -123,13 +131,80 @@ public class UrlAssetImportTest {
         URL testImg = getClass().getResource("/img/test.png");
         addImportRow(testImg.toString(), "/content/dam/test");
         addImportRow(testImg.toString(), "/content/dam/test", "rendition", "test.png");
-        addImportRow(testImg.toString() + "-404", "/content/dam/other", "rendition", "no-original-found");
         importProcess.files = importProcess.extractFilesAndFolders(importProcess.fileData.getDataRowsAsCompositeVariants());
         importProcess.createFolders(actionManager);
         importProcess.importAssets(actionManager);
         importProcess.updateMetadata(actionManager);
         importProcess.importRenditions(actionManager);
         assertEquals(1, importProcess.getCount(importProcess.importedAssets));
+        assertEquals(1, importProcess.getCount(importProcess.createdFolders));
+    }
+
+    @Test
+    public void testFolderTitlePreserve() throws IOException, RepositoryException {
+        context.load().json("/com/adobe/acs/commons/mcp/impl/processes/asset-ingestor.json", "/content/dam/testfolder");
+        importProcess.init();
+        importProcess.preserveFolderTitles = true;
+        URL testImg = getClass().getResource("/img/test.png");
+        addImportRow(testImg.toString(), "/content/dam/testfolder/test");
+        addImportRow(testImg.toString(), "/content/dam/testfolder/test", "rendition", "test.png");
+        importProcess.files = importProcess.extractFilesAndFolders(importProcess.fileData.getDataRowsAsCompositeVariants());
+        importProcess.createFolders(actionManager);
+        assertEquals(1, importProcess.getCount(importProcess.createdFolders));
+        context.currentResource("/content/dam/testfolder/jcr:content");
+        ValueMap vm = context.currentResource().getValueMap();
+        assertEquals("Test Folder", vm.get("jcr:title"));
+    }
+
+    @Test
+    public void testFolderNoTitlePreserve() throws IOException, RepositoryException {
+        context.load().json("/com/adobe/acs/commons/mcp/impl/processes/asset-ingestor.json", "/content/dam/testfolder");
+        importProcess.init();
+        importProcess.preserveFolderTitles = false;
+        URL testImg = getClass().getResource("/img/test.png");
+        addImportRow(testImg.toString(), "/content/dam/testfolder/test");
+        addImportRow(testImg.toString(), "/content/dam/testfolder/test", "rendition", "test.png");
+        importProcess.files = importProcess.extractFilesAndFolders(importProcess.fileData.getDataRowsAsCompositeVariants());
+        importProcess.createFolders(actionManager);
+        assertEquals(1, importProcess.getCount(importProcess.createdFolders));
+        context.currentResource("/content/dam/testfolder/jcr:content");
+        ValueMap vm = context.currentResource().getValueMap();
+        assertEquals("testfolder", vm.get("jcr:title"));
+    }
+
+    @Test
+    public void testImportFile404() throws IOException, RepositoryException {
+        importProcess.init();
+        URL testImg = getClass().getResource("/img/test.png");
+        addImportRow(testImg.toString(), "/content/dam/test");
+        addImportRow(testImg.toString(), "/content/dam/test", "rendition", "test.png");
+        addImportRow(testImg.toString() + "-404", "/content/dam/other", "rendition", "no-original-found");
+        importProcess.files = importProcess.extractFilesAndFolders(importProcess.fileData.getDataRowsAsCompositeVariants());
+        importProcess.createFolders(actionManager);
         assertEquals(2, importProcess.getCount(importProcess.createdFolders));
+        importProcess.importAssets(actionManager);
+        importProcess.updateMetadata(actionManager);
+        importProcess.importRenditions(actionManager);
+    }
+
+    @Test
+    public void testAddedCamelCaseProperties() throws IOException, RepositoryException {
+        importProcess.fileData = new Spreadsheet(true, CASE_INSENSITIVE_HEADERS,
+                                                 "source", "target", "rendition", "original", "dc:title", "test:camelCase");
+        importProcess.init();
+        URL testImg = getClass().getResource("/img/test.png");
+        final String expectedTitle = "title";
+        final String expectedCamelCaseProp = "come test value";
+        addImportRow(testImg.toString(), "/content/dam/test", "", "", expectedTitle, expectedCamelCaseProp);
+        importProcess.files = importProcess.extractFilesAndFolders(
+                importProcess.fileData.getDataRowsAsCompositeVariants());
+        importProcess.createFolders(actionManager);
+        importProcess.importAssets(actionManager);
+        importProcess.updateMetadata(actionManager);
+
+        Resource metadata = context.resourceResolver().getResource("/content/dam/test/test.png/jcr:content/metadata");
+        ValueMap valueMap = metadata.getValueMap();
+        assertEquals(expectedTitle, valueMap.get("dc:title"));
+        assertEquals(expectedCamelCaseProp, valueMap.get("test:camelCase"));
     }
 }

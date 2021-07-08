@@ -19,7 +19,8 @@
  */
 package com.adobe.acs.commons.functions;
 
-import aQute.bnd.annotation.ConsumerType;
+import org.osgi.annotation.versioning.ConsumerType;
+import java.util.function.Function;
 
 /**
  * Created work-alike for functionality not introduced until Java 8
@@ -33,6 +34,10 @@ import aQute.bnd.annotation.ConsumerType;
 @SuppressWarnings("squid:S00112")
 public interface CheckedFunction<T, R> {
 
+    public static <T,R> CheckedFunction<T,R> from(Function<T,R> function) {
+        return function == null ? null : t -> function.apply(t);
+    }
+    
     /**
      * Applies this function to the given argument.
      *
@@ -55,7 +60,6 @@ public interface CheckedFunction<T, R> {
      * function and then applies this function
      * @throws NullPointerException if before is null
      *
-     * @see #andThen(IFunction)
      */
     default <V> CheckedFunction<V, R> compose(final CheckedFunction<? super V, ? extends T> before) {
         if (before == null) {
@@ -77,7 +81,6 @@ public interface CheckedFunction<T, R> {
      * applies the {@code after} function
      * @throws NullPointerException if after is null
      *
-     * @see #compose(IFunction)
      */
     default <V> CheckedFunction<T, V> andThen(final CheckedFunction<? super R, ? extends V> after) {
         if (after == null) {

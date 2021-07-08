@@ -28,7 +28,7 @@ import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import static org.junit.Assert.assertEquals;
 
@@ -76,7 +76,6 @@ public class ErrorPageHandlerImplTest {
         assertEquals("/content/project/test/error-pages.html", new ErrorPageHandlerImpl().findErrorPage(request, new NonExistingResource(resourceResolver, "/content/project/test/non-existing-page")));
     }
 
-    @Ignore // does not work at the moment because the mocked resourceResolver does not support NonExistingResource in the used version
     @Test
     public void testFindErrorPage_nonExistingPageSubResource() {
         assertEquals("/content/project/test/error-pages.html", new ErrorPageHandlerImpl().findErrorPage(request, new NonExistingResource(resourceResolver, "/content/project/test/non-existing-page/jcr:content/test1/test2")));

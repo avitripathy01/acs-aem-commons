@@ -19,7 +19,6 @@
  */
 package com.adobe.acs.commons.mcp.impl.processes.asset;
 
-import com.adobe.acs.commons.mcp.impl.processes.asset.S3AssetIngestor;
 import com.adobe.acs.commons.fam.ActionManager;
 import com.adobe.acs.commons.functions.CheckedConsumer;
 import com.adobe.acs.commons.mcp.impl.processes.asset.AssetIngestor.ReportColumns;
@@ -28,6 +27,7 @@ import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.services.s3.S3ClientOptions;
 import com.amazonaws.services.s3.model.ObjectMetadata;
+import com.day.cq.dam.api.Asset;
 import com.day.cq.dam.api.AssetManager;
 import com.google.common.base.Function;
 import io.findify.s3mock.S3Mock;
@@ -47,7 +47,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.invocation.InvocationOnMock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 import org.mockito.stubbing.Answer;
 
 import javax.annotation.Nullable;
@@ -67,7 +67,7 @@ public class S3AssetIngestorTest {
 
     private S3Mock s3Mock;
 
-    @Rule
+    @Rule // Use JCR_OAK instead of JCR_MOCK so long as JCR_MOCK's MockSession.refresh() throws UnsupportedOperationException
     public final SlingContext context = new SlingContext(ResourceResolverType.JCR_OAK);
 
     @Mock
@@ -75,6 +75,9 @@ public class S3AssetIngestorTest {
 
     @Mock
     private AssetManager assetManager;
+
+    @Mock
+    private Asset createdAsset;
 
     @Captor
     private ArgumentCaptor<String> currentItemCaptor;
@@ -100,10 +103,11 @@ public class S3AssetIngestorTest {
         context.resourceResolver().commit();
         ingestor = new S3AssetIngestor(context.getService(MimeTypeService.class));
         ingestor.jcrBasePath = "/content/dam";
-        ingestor.ignoreFileList = Collections.emptyList();
-        ingestor.ignoreExtensionList = Collections.emptyList();
-        ingestor.ignoreFolderList = Arrays.asList(".ds_store");
+        ingestor.fileFilter = new NamesFilter();
+        ingestor.extensionFilter = new NamesFilter();
+        ingestor.folderFilter = new NamesFilter("-.ds_store");
         ingestor.existingAssetAction = AssetIngestor.AssetAction.skip;
+        ingestor.dryRunMode = false;
 
         int port = FreePortFinder.findFreeLocalPort();
         s3Mock = new S3Mock.Builder().withPort(port).withInMemoryBackend().build();
@@ -144,7 +148,6 @@ public class S3AssetIngestorTest {
         verify(actionManager).setCurrentItem(currentItemCaptor.capture());
         assertEquals(1, currentItemCaptor.getAllValues().size());
         assertEquals(TEST_BUCKET, currentItemCaptor.getValue());
-
     }
 
     @Test
@@ -188,6 +191,7 @@ public class S3AssetIngestorTest {
         s3Client.putObject(TEST_BUCKET, "folder2/", new ByteArrayInputStream(new byte[0]), new ObjectMetadata());
         s3Client.putObject(TEST_BUCKET, "folder2/folder3/", new ByteArrayInputStream(new byte[0]), new ObjectMetadata());
         s3Client.putObject(TEST_BUCKET, "folder2/folder3/image.png", getClass().getResourceAsStream("/img/test.png"), new ObjectMetadata());
+        when(assetManager.createAsset(anyString(), any(), anyString(), any(Boolean.class))).thenReturn(createdAsset);
 
         ingestor.importAssets(actionManager);
 
@@ -202,11 +206,20 @@ public class S3AssetIngestorTest {
         assertEquals(Arrays.asList("testbucket", "testbucket:folder1/image.png", "testbucket:folder2/folder3/image.png", "testbucket:image.png"), currentItemCaptor.getAllValues());
     }
 
+    @Test(expected = AssetIngestorException.class)
+    public void testImportAssetsWithException() throws Exception {
+        ingestor.init();
+        s3Client.putObject(TEST_BUCKET, "image.png", getClass().getResourceAsStream("/img/test.png"), new ObjectMetadata());
+
+        ingestor.importAssets(actionManager);
+    }
+
     @Test
     public void testImportAssetsToNewRootFolder() throws Exception {
         ingestor.jcrBasePath = "/content/dam/test";
         ingestor.init();
         s3Client.putObject(TEST_BUCKET, "image.png", getClass().getResourceAsStream("/img/test.png"), new ObjectMetadata());
+        when(assetManager.createAsset(anyString(), any(), anyString(), any(Boolean.class))).thenReturn(createdAsset);
 
         ingestor.importAssets(actionManager);
 
@@ -230,6 +243,7 @@ public class S3AssetIngestorTest {
         ingestor.init();
         context.create().resource("/content/dam/test", "jcr:primaryType", "sling:Folder", "jcr:title", "testTitle");
         s3Client.putObject(TEST_BUCKET, "image.png", getClass().getResourceAsStream("/img/test.png"), new ObjectMetadata());
+        when(assetManager.createAsset(anyString(), any(), anyString(), any(Boolean.class))).thenReturn(createdAsset);
 
         ingestor.importAssets(actionManager);
 
@@ -257,6 +271,7 @@ public class S3AssetIngestorTest {
         s3Client.putObject(TEST_BUCKET, "folder2/", new ByteArrayInputStream(new byte[0]), new ObjectMetadata());
         s3Client.putObject(TEST_BUCKET, "folder2/folder3/", new ByteArrayInputStream(new byte[0]), new ObjectMetadata());
         s3Client.putObject(TEST_BUCKET, "folder2/folder3/image.png", getClass().getResourceAsStream("/img/test.png"), new ObjectMetadata());
+        when(assetManager.createAsset(anyString(), any(), anyString(), any(Boolean.class))).thenReturn(createdAsset);
 
         ingestor.importAssets(actionManager);
 
@@ -316,6 +331,27 @@ public class S3AssetIngestorTest {
 
         verify(actionManager, times(4)).setCurrentItem(currentItemCaptor.capture());
         assertEquals(Arrays.asList("testbucket:a/", "testbucket:a/folder1/", "testbucket:a/folder2/", "testbucket:a/folder2/folder3/"), currentItemCaptor.getAllValues());
+    }
+
+    @Test // issue #1476
+    public void testCreateFoldersWithHyphens() throws Exception {
+        ingestor.init();
+        s3Client.putObject(TEST_BUCKET, "image.png", getClass().getResourceAsStream("/img/test.png"), new ObjectMetadata());
+        s3Client.putObject(TEST_BUCKET, "folder-with-hyphens-after-16chars/", new ByteArrayInputStream(new byte[0]), new ObjectMetadata());
+        s3Client.putObject(TEST_BUCKET, "folder-with-hyphens-after-16chars/nested-folder-with-hyphens-after-16chars/", new ByteArrayInputStream(new byte[0]), new ObjectMetadata());
+        s3Client.putObject(TEST_BUCKET, "folder-with-hyphens-after-16chars/nested-folder-with-hyphens-after-16chars/image.png", getClass().getResourceAsStream("/img/test.png"), new ObjectMetadata());
+        s3Client.putObject(TEST_BUCKET, "folder-with-hyphens-after-16chars-and-%/", new ByteArrayInputStream(new byte[0]), new ObjectMetadata());
+        s3Client.putObject(TEST_BUCKET, "folder-with-hyphens-after-16chars-and-%/nested-folder-with-hyphens-after-16chars/", new ByteArrayInputStream(new byte[0]), new ObjectMetadata());
+        s3Client.putObject(TEST_BUCKET, "folder-with-hyphens-after-16chars-and-%/nested-folder-with-hyphens-after-16chars/image.png", getClass().getResourceAsStream("/img/test.png"), new ObjectMetadata());
+
+        ingestor.createFolders(actionManager);
+
+        assertFalse(context.resourceResolver().hasChanges());
+        assertEquals(4, ingestor.getCount(ingestor.createdFolders));
+        assertNotNull(context.resourceResolver().getResource("/content/dam/folder-with-hyphens-after-16chars"));
+        assertNotNull(context.resourceResolver().getResource("/content/dam/folder-with-hyphens-after-16chars/nested-folder-with-hyphens-after-16chars"));
+        assertNotNull(context.resourceResolver().getResource("/content/dam/folder-with-hyphensafter16charsand"));
+        assertNotNull(context.resourceResolver().getResource("/content/dam/folder-with-hyphensafter16charsand/nested-folder-with-hyphens-after-16chars"));
     }
 
 }

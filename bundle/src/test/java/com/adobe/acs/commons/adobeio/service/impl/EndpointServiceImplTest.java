@@ -37,7 +37,7 @@ import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 import org.skyscreamer.jsonassert.JSONAssert;
 
 import java.util.ArrayList;
@@ -104,6 +104,30 @@ public class EndpointServiceImplTest {
         assertThat(request, hasHeader("cache-control", "no-cache"));
         assertThat(request, hasHeader("x-api-key", "API_KEY"));
         assertThat(request, hasHeader("content-type", "application/json"));
+        assertEquals(4, request.getAllHeaders().length);
+    }
+
+    @Test
+    public void testGetWithCustomContentType() throws Exception {
+        when(config.method()).thenReturn("GET");
+        endpointService.activate(config);
+        String[] customHeaders = new String[1];
+        customHeaders[0] = "content-type:application/vnd.adobe.target.v1+json";
+        JsonObject result = endpointService.performIO_Action("https://test.com", "GET",  customHeaders, null);
+        JSONAssert.assertEquals("{'result':'ok'}", result.toString(), false);
+
+        ArgumentCaptor<HttpUriRequest> captor = ArgumentCaptor.forClass(HttpUriRequest.class);
+        verify(httpClient, times(1)).execute(captor.capture());
+        verify(httpClient, times(1)).close();
+        verifyNoMoreInteractions(httpClient);
+
+        HttpUriRequest request = captor.getValue();
+        assertTrue(request instanceof HttpGet);
+        assertThat(request, hasUri("https://test.com"));
+        assertThat(request, hasHeader("authorization", "Bearer ACCESS_TOKEN"));
+        assertThat(request, hasHeader("cache-control", "no-cache"));
+        assertThat(request, hasHeader("x-api-key", "API_KEY"));
+        assertThat(request, hasHeader("Content-Type", "application/vnd.adobe.target.v1+json"));
         assertEquals(4, request.getAllHeaders().length);
     }
 

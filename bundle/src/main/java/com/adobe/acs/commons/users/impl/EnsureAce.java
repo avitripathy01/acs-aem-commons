@@ -35,7 +35,8 @@ import javax.jcr.ValueFormatException;
 import javax.jcr.security.AccessControlPolicy;
 import javax.jcr.security.Privilege;
 
-import com.adobe.acs.commons.users.impl.AbstractAuthorizable;
+import com.adobe.acs.commons.search.CloseableQuery;
+import com.adobe.acs.commons.search.CloseableQueryBuilder;
 import com.day.cq.search.result.Hit;
 import org.apache.commons.lang.StringUtils;
 import org.apache.felix.scr.annotations.Component;
@@ -46,15 +47,12 @@ import org.apache.jackrabbit.api.security.JackrabbitAccessControlList;
 import org.apache.jackrabbit.api.security.JackrabbitAccessControlManager;
 import org.apache.jackrabbit.api.security.user.Authorizable;
 import org.apache.jackrabbit.commons.jackrabbit.authorization.AccessControlUtils;
-import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AccessControlConstants;
 import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.day.cq.search.PredicateGroup;
-import com.day.cq.search.Query;
-import com.day.cq.search.QueryBuilder;
 
 @Component
 @Service(EnsureAce.class)
@@ -62,8 +60,15 @@ public class EnsureAce {
 
     private static final Logger log = LoggerFactory.getLogger(EnsureAce.class);
 
+    private static final String PROP_REP_GLOB = "rep:glob";
+    private static final String PROP_REP_NT_NAMES = "rep:ntNames";
+    private static final String PROP_REP_ITEM_NAMES = "rep:itemNames";
+    private static final String PROP_REP_PREFIXES = "rep:prefixes";
+    private static final String PROP_NT_REP_ACE = "rep:ACE";
+    private static final String PROP_REP_PRINCIPAL_NAME = "rep:principalName";
+
     @Reference
-    private QueryBuilder queryBuilder;
+    private CloseableQueryBuilder queryBuilder;
 
     /**
      * Ensures the ACEs for the Service User exists. Any extra ACEs for the Service User will be removed.
@@ -108,7 +113,7 @@ public class EnsureAce {
                     // Remove all ACE's for this user from this ACL since this Service User is not configured to cover
                     // this path
                     log.debug("Service user does NOT cover the path yet has an ACE; ensure removal of the ace! {}",
-                            ace.toString());
+                            ace);
                     acl.removeAccessControlEntry(ace);
 
                 } else {
@@ -148,25 +153,25 @@ public class EnsureAce {
 
             // Add rep:glob restriction
             if (ace.hasRepGlob()) {
-                restrictions.put(AccessControlConstants.REP_GLOB,
+                restrictions.put(PROP_REP_GLOB,
                         valueFactory.createValue(ace.getRepGlob(), PropertyType.STRING));
             }
 
             // Add rep:ntNames restriction
             if (ace.hasRepNtNames()) {
-                multiRestrictions.put(AccessControlConstants.REP_NT_NAMES,
+                multiRestrictions.put(PROP_REP_NT_NAMES,
                         getMultiValues(valueFactory, ace.getRepNtNames(), PropertyType.NAME));
             }
 
             // Add rep:itemNames
             if (ace.hasRepItemNames()) {
-                multiRestrictions.put(AccessControlConstants.REP_ITEM_NAMES,
+                multiRestrictions.put(PROP_REP_ITEM_NAMES,
                         getMultiValues(valueFactory, ace.getRepItemNames(), PropertyType.NAME));
             }
 
             // Add rep:prefixes
             if (ace.hasRepPrefixes()) {
-                multiRestrictions.put(AccessControlConstants.REP_PREFIXES,
+                multiRestrictions.put(PROP_REP_PREFIXES,
                         getMultiValues(valueFactory, ace.getRepPrefixes(), PropertyType.STRING));
             }
 
@@ -234,54 +239,42 @@ public class EnsureAce {
      * @param accessControlManager
      *            Jackrabbit access control manager
      * @return a list of ACLs that principal participates in.
-     * @throws RepositoryException
      */
     private List<JackrabbitAccessControlList> findAcls(ResourceResolver resourceResolver, String principalName,
-            JackrabbitAccessControlManager accessControlManager) throws RepositoryException {
+            JackrabbitAccessControlManager accessControlManager) {
         final Set<String> paths = new HashSet<String>();
         final List<JackrabbitAccessControlList> acls = new ArrayList<JackrabbitAccessControlList>();
 
         final Map<String, String> params = new HashMap<String, String>();
 
-        params.put("type", AccessControlConstants.NT_REP_ACE);
-        params.put("property", AccessControlConstants.REP_PRINCIPAL_NAME);
+        params.put("type", PROP_NT_REP_ACE);
+        params.put("property", PROP_REP_PRINCIPAL_NAME);
         params.put("property.value", principalName);
         params.put("p.limit", "-1");
 
-        final Query query = queryBuilder.createQuery(PredicateGroup.create(params), resourceResolver.adaptTo(Session.class));
+        try (CloseableQuery query = queryBuilder.createQuery(PredicateGroup.create(params), resourceResolver)) {
+            for (final Hit hit : query.getResult().getHits()) {
+                try {
+                    final Resource aceResource = resourceResolver.getResource(hit.getPath());
 
-        // Handle leaking resource resolver in AEM QueryBuilder
-        ResourceResolver leakingResourceResolver = null;
-        for (final Hit hit : query.getResult().getHits()) {
-            try {
-                // Handle leaking resource resolver in AEM QueryBuilder
-                if (leakingResourceResolver == null) {
-                    leakingResourceResolver = hit.getResource().getResourceResolver();
-                }
+                    // first parent is the rep:policy node
+                    // second parent (grand-parent) is the content node this ACE controls
+                    // that is the node we need to use the JackrabbitAccessControlManager api
+                    final Resource contentResource = aceResource.getParent().getParent();
 
-                final Resource aceResource = resourceResolver.getResource(hit.getPath());
-
-                // first parent is the rep:policy node
-                // second parent (grand-parent) is the content node this ACE controls
-                // that is the node we need to use the JackrabbitAccessControlManager api
-                final Resource contentResource = aceResource.getParent().getParent();
-
-                if (!paths.contains(contentResource.getPath())) {
-                    for (AccessControlPolicy policy : accessControlManager.getPolicies(contentResource.getPath())) {
-                        if (policy instanceof JackrabbitAccessControlList) {
-                            acls.add((JackrabbitAccessControlList) policy);
-                            break;
+                    if (!paths.contains(contentResource.getPath())) {
+                        paths.add(contentResource.getPath());
+                        for (AccessControlPolicy policy : accessControlManager.getPolicies(contentResource.getPath())) {
+                            if (policy instanceof JackrabbitAccessControlList) {
+                                acls.add((JackrabbitAccessControlList) policy);
+                                break;
+                            }
                         }
                     }
+                } catch (RepositoryException e) {
+                    log.error("Failed to get resource for query result.", e);
                 }
-            } catch (RepositoryException e) {
-                log.error("Failed to get resource for query result.", e);
             }
-        }
-
-        // Handle leaking resource resolver in AEM QueryBuilder
-        if (leakingResourceResolver != null) {
-            leakingResourceResolver.close();
         }
 
         return acls;

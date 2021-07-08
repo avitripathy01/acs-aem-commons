@@ -21,7 +21,7 @@ package com.adobe.acs.commons.util.visitors;
 
 import com.day.cq.commons.jcr.JcrConstants;
 import org.apache.sling.api.resource.Resource;
-import org.apache.sling.jcr.resource.JcrResourceConstants;
+import org.apache.sling.jcr.resource.api.JcrResourceConstants;
 
 /**
  * Tree visitor which allows special cases such as how to handle child nodes
@@ -34,13 +34,13 @@ import org.apache.sling.jcr.resource.JcrResourceConstants;
  */
 public class TreeFilteringResourceVisitor extends SimpleFilteringResourceVisitor {
 
-    public static String[] TREE_TYPES = {
+    protected static final String[] TREE_TYPES = {
         JcrConstants.NT_FOLDER,
         JcrResourceConstants.NT_SLING_FOLDER,
         JcrResourceConstants.NT_SLING_ORDERED_FOLDER
     };
 
-    public String[] treeTypes;
+    private String[] treeTypes;
 
     /**
      * Create a standard visitor for commonly used folder structures.

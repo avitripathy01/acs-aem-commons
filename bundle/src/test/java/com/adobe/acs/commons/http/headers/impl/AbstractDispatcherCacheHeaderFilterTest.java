@@ -19,8 +19,17 @@
  */
 package com.adobe.acs.commons.http.headers.impl;
 
-import static org.mockito.Matchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
+import static org.mockito.hamcrest.MockitoHamcrest.argThat;
 
 import java.util.Collections;
 import java.util.Dictionary;
@@ -42,22 +51,22 @@ import org.hamcrest.BaseMatcher;
 import org.hamcrest.Description;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.invocation.InvocationOnMock;
-import org.mockito.runners.MockitoJUnitRunner;
-import org.mockito.stubbing.Answer;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.cm.ConfigurationException;
 import org.osgi.service.component.ComponentContext;
-
-import com.adobe.acs.commons.http.headers.impl.AbstractDispatcherCacheHeaderFilter;
 import org.osgi.service.http.whiteboard.HttpWhiteboardConstants;
 
-@RunWith(MockitoJUnitRunner.class)
+
 public class AbstractDispatcherCacheHeaderFilterTest {
+
+    @Rule
+    public MockitoRule rule = MockitoJUnit.rule();
 
     AbstractDispatcherCacheHeaderFilter filter;
 
@@ -110,7 +119,7 @@ public class AbstractDispatcherCacheHeaderFilterTest {
             }
 
             @Override
-            protected String getHeaderValue() {
+            protected String getHeaderValue(HttpServletRequest request) {
                 return headerValue;
             }
 
@@ -126,8 +135,8 @@ public class AbstractDispatcherCacheHeaderFilterTest {
         when(request.getParameterMap()).thenReturn(params);
 
         final Map<String, Object> attributes = new HashMap<>();
-        doAnswer(i -> attributes.put(i.getArgumentAt(0, String.class), i.getArgumentAt(1, Object.class))).when(request).setAttribute(any(), any());
-        when(request.getAttribute(any())).thenAnswer(i -> attributes.get(i.getArgumentAt(0, String.class)));
+        doAnswer(i -> attributes.put(i.getArgument(0), i.getArgument(1))).when(request).setAttribute(any(), any());
+        when(request.getAttribute(any())).thenAnswer(i -> attributes.get(i.getArgument(0)));
     }
 
     @After
@@ -289,7 +298,7 @@ public class AbstractDispatcherCacheHeaderFilterTest {
 
         verify(request).getHeaders(AbstractDispatcherCacheHeaderFilter.SERVER_AGENT_NAME);
         verify(request).getMethod();
-        verify(request).getParameterMap();
+        verify(request, times(2)).getParameterMap(); 
         verifyNoMoreInteractions(request, this.request, response, chain);
     }
 

@@ -19,6 +19,10 @@
  */
 package com.adobe.acs.commons.synth.children;
 
+import com.adobe.acs.commons.json.JsonObjectUtil;
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import org.apache.commons.collections.IteratorUtils;
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.sling.api.resource.ModifiableValueMap;
@@ -26,16 +30,16 @@ import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceWrapper;
 import org.apache.sling.api.resource.ValueMap;
 import org.apache.sling.api.wrappers.ValueMapDecorator;
-import org.apache.sling.commons.json.JSONException;
-import org.apache.sling.commons.json.JSONObject;
-import org.joda.time.format.DateTimeFormatter;
-import org.joda.time.format.ISODateTimeFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.jcr.RepositoryException;
 import java.io.Serializable;
 import java.lang.reflect.InvocationTargetException;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
@@ -46,6 +50,7 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -257,15 +262,15 @@ public class ChildrenAsPropertyResource extends ResourceWrapper {
         final long start = System.currentTimeMillis();
 
         final ModifiableValueMap modifiableValueMap = this.resource.adaptTo(ModifiableValueMap.class);
-        JSONObject childrenJSON = new JSONObject();
+        JsonObject childrenJSON = new JsonObject();
 
         try {
             // Add the new entries to the JSON
             for (Resource childResource : this.orderedCache) {
-                childrenJSON.put(childResource.getName(), this.serializeToJSON(childResource));
+                childrenJSON.add(childResource.getName(), this.serializeToJSON(childResource));
             }
 
-            if (childrenJSON.length() > 0) {
+            if (childrenJSON.entrySet().size() > 0) {
                 // Persist the JSON back to the Node
                 modifiableValueMap.put(this.propertyName, childrenJSON.toString());
             } else {
@@ -277,8 +282,6 @@ public class ChildrenAsPropertyResource extends ResourceWrapper {
                     this.resource.getPath() + "/" + this.propertyName,
                     System.currentTimeMillis() - start);
 
-        } catch (JSONException e) {
-            throw new InvalidDataFormatException(this.resource, this.propertyName, childrenJSON.toString());
         } catch (NoSuchMethodException e) {
             throw new InvalidDataFormatException(this.resource, this.propertyName, childrenJSON.toString());
         } catch (IllegalAccessException e) {
@@ -301,11 +304,7 @@ public class ChildrenAsPropertyResource extends ResourceWrapper {
 
         List<SyntheticChildAsPropertyResource> resources;
 
-        try {
-            resources = deserializeToSyntheticChildResources(new JSONObject(propertyData));
-        } catch (JSONException e) {
-            throw new InvalidDataFormatException(this.resource, this.propertyName, propertyData);
-        }
+        resources = deserializeToSyntheticChildResources(JsonObjectUtil.toJsonObject(propertyData));
 
         if (this.comparator != null) {
             Collections.sort(resources, this.comparator);
@@ -323,27 +322,30 @@ public class ChildrenAsPropertyResource extends ResourceWrapper {
      *
      * @param resourceToSerialize the resource to serialize to JSON.
      * @return the JSONObject representing the resources.
-     * @throws JSONException
      */
-    protected final JSONObject serializeToJSON(final Resource resourceToSerialize)
-            throws JSONException, IllegalAccessException, NoSuchMethodException, InvocationTargetException {
+    protected final JsonObject serializeToJSON(final Resource resourceToSerialize)
+            throws IllegalAccessException, NoSuchMethodException, InvocationTargetException {
 
-        final DateTimeFormatter dtf = ISODateTimeFormat.dateTime();
+        DateTimeFormatter formatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
         final Map<String, Object> serializedData = new HashMap<String, Object>();
 
         for (Map.Entry<String, Object> entry : resourceToSerialize.getValueMap().entrySet()) {
             if (entry.getValue() instanceof Calendar) {
                 final Calendar cal = (Calendar) entry.getValue();
-                serializedData.put(entry.getKey(), dtf.print(cal.getTimeInMillis()));
+                LocalDateTime date = LocalDateTime.ofInstant(Instant.ofEpochMilli(cal.getTimeInMillis()), 
+                    ZoneId.systemDefault());
+                serializedData.put(entry.getKey(), date.format(formatter));
             } else if (entry.getValue() instanceof Date) {
                 final Date date = (Date) entry.getValue();
-                serializedData.put(entry.getKey(), dtf.print(date.getTime()));
+                LocalDateTime ldt = LocalDateTime.ofInstant(date.toInstant(), ZoneId.systemDefault());
+                serializedData.put(entry.getKey(), ldt.format(formatter));
             } else {
                 serializedData.put(entry.getKey(), entry.getValue());
             }
         }
 
-        return new JSONObject(serializedData);
+        Gson gson = new Gson();
+        return gson.toJsonTree(serializedData).getAsJsonObject();
     }
 
     /**
@@ -351,29 +353,22 @@ public class ChildrenAsPropertyResource extends ResourceWrapper {
      *
      * @param jsonObject the JSONObject to deserialize.
      * @return the list of SyntheticChildAsPropertyResources the jsonObject represents.
-     * @throws JSONException
      */
-    protected final List<SyntheticChildAsPropertyResource> deserializeToSyntheticChildResources(JSONObject jsonObject)
-            throws JSONException {
-        final List<SyntheticChildAsPropertyResource> resources = new ArrayList<SyntheticChildAsPropertyResource>();
+    protected final List<SyntheticChildAsPropertyResource> deserializeToSyntheticChildResources(JsonObject jsonObject) {
+        final List<SyntheticChildAsPropertyResource> resources = new ArrayList<>();
 
-        final Iterator<String> keys = jsonObject.keys();
-
-        while (keys.hasNext()) {
-            final String nodeName = keys.next();
-
-            JSONObject entryJSON = jsonObject.optJSONObject(nodeName);
+        for (Entry<String, JsonElement> elem : jsonObject.entrySet()) {
+            final String nodeName = elem.getKey();
+            JsonObject entryJSON = elem.getValue().getAsJsonObject();
 
             if (entryJSON == null) {
                 continue;
             }
 
-            final ValueMap properties = new ValueMapDecorator(new HashMap<String, Object>());
-            final Iterator<String> propertyNames = entryJSON.keys();
-
-            while (propertyNames.hasNext()) {
-                final String propName = propertyNames.next();
-                properties.put(propName, entryJSON.optString(propName));
+            final ValueMap properties = new ValueMapDecorator(new HashMap<>());
+            for (Entry<String, JsonElement> prop : entryJSON.entrySet()) {
+                final String propName = prop.getKey();
+                properties.put(propName, prop.getValue().getAsString());
             }
 
             resources.add(new SyntheticChildAsPropertyResource(this.getParent(), nodeName, properties));

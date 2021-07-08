@@ -20,9 +20,10 @@
 package com.adobe.acs.commons.mcp.impl;
 
 import com.adobe.acs.commons.mcp.ProcessInstance;
+import com.adobe.acs.commons.mcp.model.ArchivedProcessFailure;
 import com.adobe.acs.commons.mcp.model.ManagedProcess;
-import com.adobe.acs.commons.mcp.model.impl.ArchivedProcessFailure;
 import com.day.cq.commons.jcr.JcrUtil;
+import java.awt.Color;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.felix.scr.annotations.sling.SlingServlet;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -78,8 +79,8 @@ public class ProcessErrorReportExcelServlet extends SlingSafeMethodsServlet {
                 throw ex;
             }
         } else {
-            LOG.error("Unable to process report stored at " + request.getResource().getPath());
-            throw new ServletException("Unable to process report stored at " + request.getResource().getPath());
+            String msg = String.format("Unable to process report stored at %s", request.getResource().getPath());
+            throw new ServletException(msg);
         }
     }
 
@@ -129,7 +130,7 @@ public class ProcessErrorReportExcelServlet extends SlingSafeMethodsServlet {
 
     CellStyle createHeaderStyle(Workbook wb) {
         XSSFCellStyle xstyle = (XSSFCellStyle) wb.createCellStyle();
-        XSSFColor header = new XSSFColor(new byte[]{(byte) 79, (byte) 129, (byte) 189});
+        XSSFColor header = new XSSFColor(new Color(79, 129, 189));
         xstyle.setFillForegroundColor(header);
         xstyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
         XSSFFont font = (XSSFFont) wb.createFont();
@@ -138,20 +139,36 @@ public class ProcessErrorReportExcelServlet extends SlingSafeMethodsServlet {
         return xstyle;
     }
 
+    int getColumnBlockSize() {
+        return 256;
+    }
+
+    int getMaxColumnBlockCount() {
+        return 120;
+    }
+
+    int getMinColumnBlockCount() {
+        return 20;
+    }
+
+    int getPreferredMinBlockCount() {
+        return 12;
+    }
+
     void autosize(Sheet sheet, int lastColumnIndex) {
         for (int i = 0; i <= lastColumnIndex; i++) {
             try {
                 sheet.autoSizeColumn(i);
             } catch (Exception e) {
                 // autosize depends on AWT stuff and can fail, but it should not be fatal
-                LOG.warn("autoSizeColumn(" + i + ") failed: " + e.getMessage());
+                LOG.warn("autoSizeColumn({}) failed: {}",i, e.getMessage());
             }
             int cw = sheet.getColumnWidth(i);
             // increase width to accommodate drop-down arrow in the header
-            if (cw / 256 < 20) {
-                sheet.setColumnWidth(i, 256 * 12);
-            } else if (cw / 256 > 120) {
-                sheet.setColumnWidth(i, 256 * 120);
+            if (cw / getColumnBlockSize() < getMinColumnBlockCount()) {
+                sheet.setColumnWidth(i, getColumnBlockSize() * getPreferredMinBlockCount());
+            } else if (cw / getColumnBlockSize() > getMaxColumnBlockCount()) {
+                sheet.setColumnWidth(i, getColumnBlockSize() * getMaxColumnBlockCount());
             }
         }
     }

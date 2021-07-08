@@ -19,27 +19,34 @@
  */
 package com.adobe.acs.commons.data;
 
-import aQute.bnd.annotation.ProviderType;
+import java.lang.reflect.InvocationTargetException;
+import java.text.ParseException;
 import java.time.Instant;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.Locale;
 import java.util.Optional;
-import java.text.ParseException;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.reflect.MethodUtils;
 import org.apache.commons.lang3.time.FastDateFormat;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.DateUtil;
+import org.osgi.annotation.versioning.ProviderType;
 
 /**
- * Used to represent values that might be provided as one type but used as another. Avoids glue code and switch
- * statements in other parts of the code expecially dealing with data from spreadsheets.
+ * Used to represent values that might be provided as one baseType but used as
+ * another. Avoids glue code and switch statements in other parts of the code
+ * especially dealing with data from spreadsheets.
  */
 @ProviderType
 public final class Variant {
 
+    private Class baseType = null;
     private static final FastDateFormat STANDARD_DATE_FORMAT = FastDateFormat.getDateTimeInstance(FastDateFormat.SHORT, FastDateFormat.SHORT);
     private Optional<Long> longVal = Optional.empty();
     private Optional<Double> doubleVal = Optional.empty();
@@ -48,14 +55,17 @@ public final class Variant {
     private Optional<Date> dateVal = Optional.empty();
 
     private static final FastDateFormat[] DATE_FORMATS = {
-        FastDateFormat.getDateInstance(FastDateFormat.SHORT),
-        FastDateFormat.getDateInstance(FastDateFormat.LONG),
-        FastDateFormat.getTimeInstance(FastDateFormat.SHORT),
-        FastDateFormat.getTimeInstance(FastDateFormat.LONG),
-        STANDARD_DATE_FORMAT,
-        FastDateFormat.getDateTimeInstance(FastDateFormat.LONG, FastDateFormat.SHORT),
-        FastDateFormat.getDateTimeInstance(FastDateFormat.SHORT, FastDateFormat.LONG),
-        FastDateFormat.getDateTimeInstance(FastDateFormat.LONG, FastDateFormat.LONG),};
+            FastDateFormat.getDateInstance(FastDateFormat.SHORT),
+            FastDateFormat.getDateInstance(FastDateFormat.LONG),
+            FastDateFormat.getTimeInstance(FastDateFormat.SHORT),
+            FastDateFormat.getTimeInstance(FastDateFormat.LONG),
+            STANDARD_DATE_FORMAT,
+            FastDateFormat.getDateTimeInstance(FastDateFormat.LONG, FastDateFormat.SHORT),
+            FastDateFormat.getDateTimeInstance(FastDateFormat.SHORT, FastDateFormat.LONG),
+            FastDateFormat.getDateTimeInstance(FastDateFormat.LONG, FastDateFormat.LONG),
+            FastDateFormat.getDateTimeInstance(FastDateFormat.FULL, FastDateFormat.FULL),
+            FastDateFormat.getInstance("yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+    };
 
     public Variant() {
     }
@@ -65,7 +75,11 @@ public final class Variant {
     }
 
     public Variant(Cell src) {
-        setValue(src);
+        this(src, Locale.getDefault());
+    }
+
+    public Variant(Cell src, Locale locale) {
+        setValue(src, locale);
     }
 
     public void clear() {
@@ -84,44 +98,78 @@ public final class Variant {
                 && !booleanVal.isPresent();
     }
 
-    private void setValue(Cell cell) {
-        int cellType = cell.getCellType();
-        if (cellType == Cell.CELL_TYPE_FORMULA) {
-            cellType = cell.getCachedFormulaResultType();
+    @SuppressWarnings("squid:S00115")
+    public static enum CellType {
+        // POI switches from int-based to enum-based constants, and unfortunately they also removed things along the way.
+        // This bridges the gap between the constants and the enum types.
+        // _NONE is used to match POI 4, see https://poi.apache.org/apidocs/4.0/org/apache/poi/ss/usermodel/CellType.html
+        // therefore ignoring the code climate issue for this
+        _NONE(3), NUMERIC(0), STRING(1), FORMULA(2), BLANK(3), BOOLEAN(4), ERROR(5);
+        int ord;
+        CellType(int ord) {
+            this.ord=ord;
         }
-        switch (cellType) {
-            case Cell.CELL_TYPE_BOOLEAN:
-                setValue(cell.getBooleanCellValue());
-                break;
-            case Cell.CELL_TYPE_NUMERIC:
-                double number = cell.getNumericCellValue();
-                if (Math.floor(number) == number) {
-                    setValue((long) number);
-                } else {
-                    setValue(number);
+
+        public static CellType fromObject(Object o) {
+            if (o.getClass() == String.class || o.getClass().isEnum()) {
+                return CellType.valueOf(o.toString());
+            } else {
+                int num = (Integer) o;
+                for (CellType ct:values()) {
+                    if (ct.ord == num) {
+                        return ct;
+                    }
                 }
-                if (DateUtil.isCellDateFormatted(cell)) {
-                    setValue(cell.getDateCellValue());
-                }
-                DataFormatter dataFormatter = new DataFormatter();
-                if (cellType == Cell.CELL_TYPE_FORMULA) {
-                    setValue(dataFormatter.formatCellValue(cell));
-                } else {
-                    CellStyle cellStyle = cell.getCellStyle();
-                    setValue(dataFormatter.formatRawCellContents(
-                            cell.getNumericCellValue(),
-                            cellStyle.getDataFormat(),
-                            cellStyle.getDataFormatString()
-                    ));
-                }
-                break;
-            case Cell.CELL_TYPE_STRING:
-                setValue(cell.getStringCellValue().trim());
-                break;
-            case Cell.CELL_TYPE_BLANK:
-            default:
-                clear();
-                break;
+                return null;
+            }
+        }
+    }
+
+    private void setValue(Cell cell, Locale locale) {
+        try {
+            // Use reflection to access the method as it changes return type from int to CellType in 4.x
+            CellType cellType = CellType.fromObject(MethodUtils.invokeMethod(cell, "getCellType"));
+            if (cellType == CellType.FORMULA) {
+                // Use reflection to access the method as it changes return type from int to CellType in 4.x
+                cellType = CellType.fromObject(MethodUtils.invokeMethod(cell,"getCachedFormulaResultType"));
+            }
+            switch (cellType) {
+                case BOOLEAN:
+                    setValue(cell.getBooleanCellValue());
+                    break;
+                case NUMERIC:
+                    double number = cell.getNumericCellValue();
+                    if (Math.floor(number) == number) {
+                        setValue((long) number);
+                    } else {
+                        setValue(number);
+                    }
+                    if (DateUtil.isCellDateFormatted(cell)) {
+                        setValue(cell.getDateCellValue());
+                        baseType = Calendar.class;
+                    }
+                    DataFormatter dataFormatter = new DataFormatter(locale);
+                    if (cellType == CellType.FORMULA) {
+                        setValue(dataFormatter.formatCellValue(cell));
+                    } else {
+                        CellStyle cellStyle = cell.getCellStyle();
+                        setValue(dataFormatter.formatRawCellContents(
+                                cell.getNumericCellValue(),
+                                cellStyle.getDataFormat(),
+                                cellStyle.getDataFormatString()
+                        ));
+                    }
+                    break;
+                case STRING:
+                    setValue(cell.getStringCellValue().trim());
+                    break;
+                case BLANK:
+                default:
+                    clear();
+                    break;
+            }
+        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException ex) {
+            Logger.getLogger(Variant.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
 
@@ -130,38 +178,65 @@ public final class Variant {
         if (val == null) {
             return;
         }
-        Class type = val.getClass();
-        if (type == Variant.class) {
+        Class valueType = val.getClass();
+        if (valueType == Variant.class) {
             Variant v = (Variant) val;
             longVal = v.longVal;
             doubleVal = v.doubleVal;
             stringVal = v.stringVal;
             booleanVal = v.booleanVal;
             dateVal = v.dateVal;
-        } else if (type == Byte.TYPE || type == Byte.class) {
+            this.baseType = v.baseType;
+        } else if (valueType == Byte.TYPE || valueType == Byte.class) {
             setLongVal(((Byte) val).longValue());
-        } else if (type == Integer.TYPE || type == Integer.class) {
+            if (baseType == null || baseType == String.class) {
+                baseType = Long.TYPE;
+            }
+        } else if (valueType == Integer.TYPE || valueType == Integer.class) {
             setLongVal(((Integer) val).longValue());
-        } else if (type == Long.TYPE || type == Long.class) {
+            if (baseType == null || baseType == String.class) {
+                baseType = Long.TYPE;
+            }
+        } else if (valueType == Long.TYPE || valueType == Long.class) {
             setLongVal((Long) val);
-        } else if (type == Short.TYPE || type == Short.class) {
+            if (baseType == null || baseType == String.class) {
+                baseType = Long.TYPE;
+            }
+        } else if (valueType == Short.TYPE || valueType == Short.class) {
             setLongVal(((Short) val).longValue());
-        } else if (type == Float.TYPE || type == Float.class) {
+            if (baseType == null || baseType == String.class) {
+                baseType = Long.TYPE;
+            }
+        } else if (valueType == Float.TYPE || valueType == Float.class
+                || valueType == Double.TYPE || valueType == Double.class) {
             setDoubleVal((Double) val);
-        } else if (type == Double.TYPE || type == Double.class) {
-            setDoubleVal((Double) val);
-        } else if (type == Boolean.TYPE || type == Boolean.class) {
+            if (baseType == null || baseType == String.class) {
+                baseType = Double.TYPE;
+            }
+        } else if (valueType == Boolean.TYPE || valueType == Boolean.class) {
             setBooleanVal((Boolean) val);
-        } else if (type == String.class) {
+            if (baseType == null || baseType == String.class) {
+                baseType = Boolean.TYPE;
+            }
+        } else if (valueType == String.class) {
             setStringVal((String) val);
-        } else if (type == Date.class) {
+            if (baseType == null) {
+                baseType = String.class;
+            }
+        } else if (valueType == Date.class) {
             setDateVal((Date) val);
-        } else if (type == Instant.class) {
+            baseType = Calendar.class;
+        } else if (valueType == Instant.class) {
             setDateVal(new Date(((Instant) val).toEpochMilli()));
-        } else if (type == Calendar.class) {
+            baseType = Calendar.class;
+        } else if (valueType == Calendar.class) {
             setDateVal(((Calendar) val).getTime());
+            baseType = Calendar.class;
         } else {
             setStringVal(String.valueOf(val));
+            if (baseType == null) {
+                baseType = String.class;
+            }
         }
     }
 
@@ -214,6 +289,7 @@ public final class Variant {
                         })));
     }
 
+    @Override
     public String toString() {
         return stringVal.orElse(dateVal.map(STANDARD_DATE_FORMAT::format)
                 .orElse(doubleVal.map(String::valueOf)
@@ -244,7 +320,8 @@ public final class Variant {
     }
 
     /**
-     * Truthiness is any non-empty string that looks like a non-zero number or looks like it is True, Yes, or X
+     * Truthiness is any non-empty string that looks like a non-zero number or
+     * looks like it is True, Yes, or X
      *
      * @param s String to evaluate
      * @return True if it is truthy, otherwise false
@@ -298,5 +375,9 @@ public final class Variant {
     public static <S, D> D convert(S val, Class<D> destType) {
         Variant v = new Variant(val);
         return v.asType(destType);
+    }
+
+    Class getBaseType() {
+        return baseType;
     }
 }

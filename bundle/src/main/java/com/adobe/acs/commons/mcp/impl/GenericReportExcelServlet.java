@@ -21,6 +21,7 @@ package com.adobe.acs.commons.mcp.impl;
 
 import com.adobe.acs.commons.mcp.model.GenericReport;
 import com.day.cq.commons.jcr.JcrUtil;
+import java.awt.Color;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.felix.scr.annotations.sling.SlingServlet;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -74,8 +75,8 @@ public class GenericReportExcelServlet extends SlingSafeMethodsServlet {
                 throw ex;
             }
         } else {
-            LOG.error("Unable to process report stored at "+request.getResource().getPath());
-            throw new ServletException("Unable to process report stored at "+request.getResource().getPath());
+            String msg = String.format("Unable to process report stored at %s", request.getResource().getPath());
+            throw new ServletException(msg);
         }
     }
 
@@ -132,7 +133,7 @@ public class GenericReportExcelServlet extends SlingSafeMethodsServlet {
 
     CellStyle createHeaderStyle(Workbook wb){
         XSSFCellStyle xstyle = (XSSFCellStyle)wb.createCellStyle();
-        XSSFColor header = new XSSFColor(new byte[]{(byte)79, (byte)129, (byte)189} );
+        XSSFColor header = new XSSFColor(new Color(79, 129, 189));
         xstyle.setFillForegroundColor(header);
         xstyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
         XSSFFont font = (XSSFFont)wb.createFont();
@@ -147,7 +148,7 @@ public class GenericReportExcelServlet extends SlingSafeMethodsServlet {
                 sheet.autoSizeColumn(i);
             } catch (Exception e){
                 // autosize depends on AWT stuff and can fail, but it should not be fatal
-                LOG.warn("autoSizeColumn(" + i + ") failed: " + e.getMessage());
+                LOG.warn("autoSizeColumn({}) failed: {}",i, e.getMessage());
             }
             int cw = sheet.getColumnWidth(i);
             // increase width to accommodate drop-down arrow in the header

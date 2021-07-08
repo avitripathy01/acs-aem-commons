@@ -43,14 +43,13 @@ import java.util.Arrays;
 import static com.adobe.acs.commons.exporters.impl.users.Constants.*;
 
 @SlingServlet(
-        label = "ACS AEM Commons - Users to CSV - Init Servlet",
         methods = {"GET"},
         resourceTypes = {"acs-commons/components/utilities/exporters/users-to-csv"},
         selectors = {"init"},
         extensions = {"json"}
 )
 public class UsersInitServlet extends SlingSafeMethodsServlet {
-    private static final String QUERY = "SELECT * FROM [rep:Group] WHERE ISDESCENDANTNODE([/home/groups]) ORDER BY [rep:principalName]";
+    private static final String QUERY = "SELECT * FROM [rep:Group]  ORDER BY [rep:principalName]";
     private static final String KEY_TEXT = "text";
     private static final String KEY_VALUE = "value";
 

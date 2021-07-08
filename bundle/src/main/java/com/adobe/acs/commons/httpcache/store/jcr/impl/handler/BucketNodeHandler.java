@@ -19,9 +19,11 @@
  */
 package com.adobe.acs.commons.httpcache.store.jcr.impl.handler;
 
+import static com.adobe.acs.commons.httpcache.store.jcr.impl.JCRHttpCacheStoreConstants.PN_EXPIRES_ON;
 import static org.apache.jackrabbit.commons.JcrUtils.getOrCreateUniqueByPath;
 
 import java.io.IOException;
+import java.time.Clock;
 
 import javax.jcr.Node;
 import javax.jcr.NodeIterator;
@@ -37,25 +39,40 @@ public class BucketNodeHandler
 
     private final Node bucketNode;
     private final DynamicClassLoaderManager dynamicClassLoaderManager;
+    
+    private final Clock clock;
 
-    public BucketNodeHandler(Node node, DynamicClassLoaderManager dynamicClassLoaderManager){
+    public BucketNodeHandler(Node node, DynamicClassLoaderManager dynamicClassLoaderManager, Clock clock){
         this.bucketNode = node;
         this.dynamicClassLoaderManager = dynamicClassLoaderManager;
+        this.clock = clock;
     }
 
-    public Node createOrRetrieveEntryNode(CacheKey key)
+    public Node createOrRetrieveEntryNode(CacheKey key, long engineDefaultExpiryInMs)
             throws RepositoryException, IOException, ClassNotFoundException
     {
         final Node existingEntryNode = getEntryIfExists(key);
 
         if(null != existingEntryNode) {
+            if(key.getExpiryForUpdate() > 0){
+                existingEntryNode.setProperty(PN_EXPIRES_ON, System.currentTimeMillis() + key.getExpiryForUpdate());
+            }
+
             return existingEntryNode;
         }else {
-            return getOrCreateUniqueByPath(bucketNode, JCRHttpCacheStoreConstants.PATH_ENTRY, JCRHttpCacheStoreConstants.OAK_UNSTRUCTURED);
+            Node created =  getOrCreateUniqueByPath(bucketNode, JCRHttpCacheStoreConstants.PATH_ENTRY, JCRHttpCacheStoreConstants.OAK_UNSTRUCTURED);
+            created.setProperty(PN_EXPIRES_ON, System.currentTimeMillis() + engineDefaultExpiryInMs);
+            return created;
         }
     }
 
     public Node getEntryIfExists(CacheKey key)
+            throws RepositoryException, IOException, ClassNotFoundException
+    {
+        return getEntryIfExists(key, false);
+    }
+    
+    public Node getEntryIfExists(CacheKey key, boolean ignoreExpiration)
             throws RepositoryException, IOException, ClassNotFoundException
     {
         final NodeIterator entryNodeIterator  = bucketNode.getNodes();
@@ -63,11 +80,12 @@ public class BucketNodeHandler
         while(entryNodeIterator.hasNext()){
             Node entryNode = entryNodeIterator.nextNode();
             CacheKey entryKey = new EntryNodeToCacheKeyHandler(entryNode, dynamicClassLoaderManager).get();
-            if(key.equals(entryKey)) {
+            boolean isExpired = entryNode.getProperty(PN_EXPIRES_ON).getLong() < clock.instant().toEpochMilli();
+            if(key.equals(entryKey) && (!(isExpired && !ignoreExpiration))) {
                 return entryNode;
-            }
+            } 
         }
-
         return null;
     }
+    
 }

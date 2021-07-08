@@ -23,7 +23,8 @@ package com.adobe.acs.commons.users.impl;
 import org.apache.commons.lang.ArrayUtils;
 
 public final class ProtectedAuthorizables {
-    private ProtectedAuthorizables() {}
+    private ProtectedAuthorizables() {
+    }
 
     private static final String[] PRINCIPAL_NAMES = new String[] {
 
@@ -158,7 +159,6 @@ public final class ProtectedAuthorizables {
                 "acs-commons-twitter-updater-service",
                 "acs-commons-review-task-asset-mover-service",
                 "acs-commons-httpcache-jcr-storage-service",
-                "acs-commons-automatic-package-replicator-service",
                 "acs-commons-manage-controlled-processes-service",
 
                 /** AEM Groups **/

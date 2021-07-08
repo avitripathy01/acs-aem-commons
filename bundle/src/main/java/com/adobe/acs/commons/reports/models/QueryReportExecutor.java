@@ -24,12 +24,17 @@ import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Enumeration;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Optional;
+import java.util.Spliterator;
+import java.util.Spliterators;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
+import javax.jcr.Node;
 import javax.jcr.NodeIterator;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
@@ -40,6 +45,12 @@ import javax.jcr.query.QueryResult;
 import javax.jcr.query.Row;
 import javax.jcr.query.RowIterator;
 
+import com.adobe.acs.commons.reports.api.ReportException;
+import com.adobe.acs.commons.reports.api.ReportExecutor;
+import com.adobe.acs.commons.reports.api.ResultsPage;
+import com.github.jknack.handlebars.Handlebars;
+import com.github.jknack.handlebars.Template;
+
 import org.apache.commons.lang.StringEscapeUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.sling.api.SlingHttpServletRequest;
@@ -48,12 +59,6 @@ import org.apache.sling.api.resource.ResourceResolver;
 import org.apache.sling.models.annotations.Model;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.adobe.acs.commons.reports.api.ReportException;
-import com.adobe.acs.commons.reports.api.ReportExecutor;
-import com.adobe.acs.commons.reports.api.ResultsPage;
-import com.github.jknack.handlebars.Handlebars;
-import com.github.jknack.handlebars.Template;
 
 /**
  * Model for executing report requests.
@@ -77,11 +82,10 @@ public class QueryReportExecutor implements ReportExecutor {
 
   private ResultsPage fetchResults(int limit, int offset) throws ReportException {
     prepareStatement();
-    ResourceResolver resolver = request.getResourceResolver();
-    Session session = resolver.adaptTo(Session.class);
-    List<Object> results = new ArrayList<>();
     try {
-      QueryManager queryMgr = session.getWorkspace().getQueryManager();
+      ResourceResolver resolver = request.getResourceResolver();
+      QueryManager queryMgr = Optional.ofNullable(resolver.adaptTo(Session.class))
+          .orElseThrow(() -> new ReportException("Failed to get JCR Session")).getWorkspace().getQueryManager();
 
       Query query = queryMgr.createQuery(statement, config.getQueryLanguage());
 
@@ -93,16 +97,18 @@ public class QueryReportExecutor implements ReportExecutor {
         log.debug("Fetching all results");
       }
       QueryResult result = query.execute();
+
       NodeIterator nodes = result.getNodes();
 
-      while (nodes.hasNext()) {
-        results.add(resolver.getResource(nodes.nextNode().getPath()));
-      }
+      Spliterator<Node> spliterator = Spliterators.spliteratorUnknownSize(nodes,
+          Spliterator.ORDERED | Spliterator.NONNULL);
+
+      Stream<Resource> results = StreamSupport.stream(spliterator, false).map(n -> getResource(n, resolver));
+
+      return new ResultsPage(results, config.getPageSize(), page, nodes.getSize());
     } catch (RepositoryException re) {
-      log.error("Exception executing search results", re);
       throw new ReportException("Exception executing search results", re);
     }
-    return new ResultsPage(results, config.getPageSize(), page);
   }
 
   @Override
@@ -112,15 +118,15 @@ public class QueryReportExecutor implements ReportExecutor {
 
   @Override
   public String getDetails() throws ReportException {
-    Map<String, String> details = new LinkedHashMap<String, String>();
+    Map<String, String> details = new LinkedHashMap<>();
     details.put("Language", config.getQueryLanguage());
     details.put("Page", Integer.toString(page));
     details.put("Page Size", Integer.toString(config.getPageSize()));
     details.put("Query", statement);
 
     try {
-      final QueryManager queryManager = request.getResourceResolver().adaptTo(Session.class).getWorkspace()
-          .getQueryManager();
+      final QueryManager queryManager = Optional.ofNullable(request.getResourceResolver().adaptTo(Session.class))
+          .orElseThrow(() -> new ReportException("Failed to get JCR Session")).getWorkspace().getQueryManager();
       final Query query = queryManager.createQuery("explain " + statement, config.getQueryLanguage());
       final QueryResult queryResult = query.execute();
 
@@ -137,7 +143,6 @@ public class QueryReportExecutor implements ReportExecutor {
       }
 
     } catch (RepositoryException re) {
-      log.error("Exception getting details", re);
       throw new ReportException("Exception getting details", re);
     }
     StringBuilder sb = new StringBuilder();
@@ -151,7 +156,7 @@ public class QueryReportExecutor implements ReportExecutor {
 
   @Override
   public String getParameters() throws ReportException {
-    List<String> params = new ArrayList<String>();
+    List<String> params = new ArrayList<>();
     Enumeration<String> keys = request.getParameterNames();
     while (keys.hasMoreElements()) {
       String key = keys.nextElement();
@@ -166,6 +171,15 @@ public class QueryReportExecutor implements ReportExecutor {
     return StringUtils.join(params, "&");
   }
 
+  private Resource getResource(Node node, ResourceResolver resolver) {
+    try {
+      return resolver.getResource(node.getPath());
+    } catch (RepositoryException e) {
+      log.warn("Failed to get path from node: {}", node, e);
+      return null;
+    }
+  }
+
   @Override
   public ResultsPage getResults() throws ReportException {
     return fetchResults(config.getPageSize(), config.getPageSize() * page);
@@ -173,20 +187,9 @@ public class QueryReportExecutor implements ReportExecutor {
 
   private void prepareStatement() throws ReportException {
     try {
-      Map<String, String> parameters = new HashMap<String, String>();
-      Enumeration<String> paramNames = request.getParameterNames();
-      while (paramNames.hasMoreElements()) {
-        String key = paramNames.nextElement();
-        parameters.put(key, StringEscapeUtils.escapeSql(request.getParameter(key)));
-      }
-      log.trace("Loading parameters from request: {}", parameters);
-
-      Handlebars handlebars = new Handlebars();
-
-      Template template = handlebars.compileInline(config.getQuery());
-
+      Map<String, String> parameters = getParamPatternMap(request);
+      Template template = new Handlebars().compileInline(config.getQuery());
       statement = template.apply(parameters);
-
       log.trace("Loaded statement: {}", statement);
     } catch (IOException ioe) {
       throw new ReportException("Exception templating query", ioe);

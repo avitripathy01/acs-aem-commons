@@ -19,23 +19,90 @@
  */
 package com.adobe.acs.commons.mcp.form;
 
-import aQute.bnd.annotation.ProviderType;
+import java.lang.annotation.Annotation;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import org.osgi.annotation.versioning.ProviderType;
 
 /**
  * Annotation used to declare process inputs.
  */
 @ProviderType
-@Target(ElementType.FIELD)
+@Target(value={ElementType.FIELD, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
 public @interface FormField {
+
     String name();
+
     String hint() default "";
+
     String description() default "";
-    boolean required() default true;
+
+    String category() default "";
+
+    boolean required() default false;
+
     Class<? extends FieldComponent> component() default TextfieldComponent.class;
+
     String[] options() default {};
+
+    boolean showOnCreate() default true;
+
+    public static class Factory {
+        private Factory() {
+            // Factory cannot be instantiated
+        }
+
+        // Create FormField annotation, used to programatically generate forms when introspection isn't an option.
+        public static FormField create(String name, String hint, String description, String category, boolean required, Class<? extends FieldComponent> clazz, String[] options) {
+            return new FormField() {
+                @Override
+                public String name() {
+                    return name;
+                }
+
+                @Override
+                public String hint() {
+                    return hint;
+                }
+
+                @Override
+                public String description() {
+                    return description;
+                }
+
+                @Override
+                public String category() {
+                    return category;
+                }
+
+                @Override
+                public boolean required() {
+                    return required;
+                }
+
+                @Override
+                public Class<? extends FieldComponent> component() {
+                    return clazz;
+                }
+
+                @Override
+                public String[] options() {
+                    return options == null ? new String[0] : options;
+                }
+
+                @Override
+                public Class<? extends Annotation> annotationType() {
+                    return null;
+                }
+
+                @Override
+                public boolean showOnCreate() {
+                    return true;
+                }
+            };
+        }
+    }
 }
